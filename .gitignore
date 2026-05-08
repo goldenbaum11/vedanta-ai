@@ -1,0 +1,56 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+vedanta.db*
+
+# ChromaDB / RAG persistence
+data/chroma/
+backend/data/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Backups (encrypted backup outputs)
+backups/
+
+# Media outputs (keep source dirs but ignore generated artifacts)
+data/media/_generated/

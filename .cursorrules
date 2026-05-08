@@ -1,0 +1,35 @@
+# Vedanta AI — Cursor Rules
+
+## Project context
+This is a local-first, privacy-sensitive multi-agent AI system for an ashram.
+All user data stays on local infrastructure. No data should be sent to
+external APIs unless explicitly required (Instagram Graph API is the only exception).
+
+## Code style
+- Python: follow PEP 8, use async/await for all I/O, type hints on all functions
+- TypeScript: strict mode, functional components only, no class components
+- All API endpoints must be authenticated except /health and /webhook/instagram
+- Every function that touches PII must write to the audit_log table
+
+## Architecture rules
+- Each agent is a separate Python module with a single async entry function:
+  async def handle(query: str, context: dict) -> AgentResponse
+- Agents do NOT call each other directly — all routing goes through dispatcher.py
+- RAG retrieval must be called before LLM inference for all knowledge queries
+- LLM calls go through llm_client.py only — never call Ollama directly
+
+## Security rules
+- Never log raw user messages to stdout/stderr — only to the encrypted audit_log
+- All PII fields in database must be encrypted at rest
+- No hardcoded secrets — use environment variables via python-dotenv
+
+## Naming conventions
+- Agent files: snake_case matching the intent classifier output labels
+- API routes: /api/v1/{resource} pattern
+- Database tables: snake_case, plural (messages, users, audit_logs)
+
+## What NOT to do
+- Do not use OpenAI, Anthropic, or any cloud LLM API — local Ollama only
+- Do not store plaintext passwords
+- Do not auto-send Instagram DMs without human review in v1
+- Do not invent Sanskrit translations — always retrieve from the corpus first
