@@ -26,6 +26,7 @@ export interface ChatResponse {
   citations: Citation[];
   metadata: Record<string, unknown>;
   escalate: boolean;
+  thread_id: string;
   created_at: string;
 }
 
@@ -33,6 +34,16 @@ export interface ChatRequest {
   message: string;
   user_id?: string | null;
   agent_override?: AgentName | null;
+  thread_id?: string | null;
+}
+
+export interface ThreadSummary {
+  thread_id: string;
+  title: string | null;
+  message_count: number;
+  last_active_at: string;
+  started_at: string;
+  last_agent: AgentName | null;
 }
 
 export interface HealthResponse {
@@ -94,7 +105,13 @@ export async function sendChat(payload: ChatRequest): Promise<ChatResponse> {
  * one of these shapes.
  */
 export type StreamEvent =
-  | { type: "intent"; agent: AgentName; confidence: number; rationale: string | null }
+  | {
+      type: "intent";
+      agent: AgentName;
+      confidence: number;
+      rationale: string | null;
+      thread_id?: string;
+    }
   | {
       type: "meta";
       agent: AgentName;
@@ -107,9 +124,10 @@ export type StreamEvent =
       type: "done";
       text: string;
       created_at?: string;
+      thread_id?: string;
       incomplete?: boolean;
     }
-  | { type: "error"; message: string; text?: string };
+  | { type: "error"; message: string; text?: string; thread_id?: string };
 
 /**
  * Stream chat tokens from the backend. Yields parsed events as they
@@ -182,25 +200,38 @@ export async function fetchAgents(): Promise<{ agents: AgentName[] }> {
 export interface MessageRow {
   id: number;
   user_id: string | null;
+  thread_id: string | null;
   agent: AgentName;
   intent_confidence: number;
   query: string;
   response: string;
   metadata_json: string | null;
   citations_json: string | null;
+  escalate: number;
   created_at: string;
 }
 
 export async function fetchMessages(
   limit = 50,
   userId?: string | null,
+  threadId?: string | null,
 ): Promise<{ messages: MessageRow[] }> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (userId) {
     params.set("user_id", userId);
   }
+  if (threadId) {
+    params.set("thread_id", threadId);
+  }
   return request<{ messages: MessageRow[] }>(
     `/api/v1/messages?${params.toString()}`,
+  );
+}
+
+export async function fetchThreads(limit = 50): Promise<{ threads: ThreadSummary[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request<{ threads: ThreadSummary[] }>(
+    `/api/v1/threads?${params.toString()}`,
   );
 }
 

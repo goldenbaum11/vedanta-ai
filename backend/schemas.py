@@ -35,6 +35,15 @@ class ChatRequest(BaseModel):
         default=None,
         description="If set, bypasses the intent classifier and routes directly.",
     )
+    thread_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Conversation thread id. Empty/missing means start a new "
+            "thread; the server returns the assigned id in the "
+            "response. Subsequent turns should echo it back."
+        ),
+    )
 
 
 class IntentResult(BaseModel):
@@ -64,7 +73,19 @@ class ChatResponse(BaseModel):
     citations: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     escalate: bool = False
+    thread_id: str
     created_at: datetime
+
+
+class ThreadSummary(BaseModel):
+    """One row in `GET /api/v1/threads`."""
+
+    thread_id: str
+    title: str | None = None
+    message_count: int
+    last_active_at: datetime
+    started_at: datetime
+    last_agent: AgentName | None = None
 
 
 class RegisterRequest(BaseModel):

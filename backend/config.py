@@ -70,6 +70,23 @@ class Settings(BaseSettings):
     rate_limit_chat_authenticated: str = "120/minute"
     rate_limit_auth: str = "10/minute"
 
+    # Sanskrit Heritage Platform integration.
+    # When `sanskrit_heritage_enabled` is True, the `sanskrit_grammar`
+    # agent will call this endpoint BEFORE the LLM and prepend the
+    # parser output as deterministic structural grounding. Default
+    # disabled so dev environments without an SHP server keep the
+    # current LLM-only behaviour.
+    sanskrit_heritage_enabled: bool = False
+    sanskrit_heritage_base_url: str = (
+        "https://sanskrit.inria.fr/cgi-bin/SKT/sktreader.cgi"
+    )
+    sanskrit_heritage_timeout_seconds: float = 8.0
+    # Transliteration scheme of inputs sent to the parser. The Inria
+    # reader accepts `VH` (Velthuis), `KH` (Kyoto-Harvard), `WX`,
+    # `RN` (Roman with diacritics ~ IAST). Devanagari input is
+    # auto-detected when present.
+    sanskrit_heritage_input_scheme: str = "RN"
+
     admin_email: str = ""
     local_timezone: str = "Asia/Kolkata"
 

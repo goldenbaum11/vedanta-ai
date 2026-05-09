@@ -4,6 +4,13 @@ Keeps agent boilerplate uniform: every agent calls one of two helpers
 here for the LLM round trip, and the helpers handle audit-friendly
 metadata, graceful degradation when the LLM is offline, and (for
 streaming) the event protocol consumed by `/api/v1/chat/stream`.
+
+Multi-turn context lives on the `context` dict the dispatcher passes
+in. The chat endpoint loads recent thread history from SQLite and
+populates ``context["thread_history"]`` as a list of
+``{"role": "user"|"assistant", "content": "..."}`` items, in
+chronological order. We translate those into the OpenAI-style
+messages list and hand them to the LLM client.
 """
 
 from __future__ import annotations
@@ -11,7 +18,12 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncIterator
 
-from ..models.llm_client import LLMUnavailableError, get_llm_client
+from ..models.llm_client import (
+    ChatMessage,
+    LLMUnavailableError,
+    _build_messages,
+    get_llm_client,
+)
 from ..schemas import AgentName, AgentResponse
 
 logger = logging.getLogger(__name__)
@@ -28,6 +40,22 @@ def _fallback_text(agent: AgentName) -> str:
         "Start Ollama (`ollama serve`) or load a model in LM Studio "
         "and ensure LLM_PROVIDER in .env matches."
     )
+
+
+def _history_from_context(context: dict[str, Any]) -> list[ChatMessage]:
+    """Pull a sanitized history list off `context`, dropping malformed entries."""
+    raw = context.get("thread_history") if isinstance(context, dict) else None
+    if not isinstance(raw, list):
+        return []
+    history: list[ChatMessage] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content:
+            history.append({"role": role, "content": content})
+    return history
 
 
 async def respond_with_llm(
@@ -47,9 +75,13 @@ async def respond_with_llm(
     the rest of the pipeline (UI, audit log) still functions during dev.
     """
     metadata: dict[str, Any] = {"agent": agent, **(metadata_extra or {})}
+    history = _history_from_context(context)
+    if history:
+        metadata["history_turns"] = len(history)
     try:
         llm = get_llm_client()
-        text = await llm.complete(system_prompt=system_prompt, user_message=query)
+        messages = _build_messages(system_prompt, query, history)
+        text = await llm.complete_messages(messages)
         metadata["model"] = llm.default_model
         return AgentResponse(
             agent=agent,
@@ -100,6 +132,9 @@ async def respond_with_llm_stream(
     """
     metadata: dict[str, Any] = {"agent": agent, **(metadata_extra or {})}
     citations_payload = citations or []
+    history = _history_from_context(context)
+    if history:
+        metadata["history_turns"] = len(history)
 
     try:
         llm = get_llm_client()
@@ -127,9 +162,8 @@ async def respond_with_llm_stream(
 
     accumulated: list[str] = []
     try:
-        async for delta in llm.complete_stream(
-            system_prompt=system_prompt, user_message=query
-        ):
+        messages = _build_messages(system_prompt, query, history)
+        async for delta in llm.complete_messages_stream(messages):
             accumulated.append(delta)
             yield {"type": "token", "delta": delta}
     except LLMUnavailableError as exc:

@@ -28,6 +28,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 def _reset_singletons() -> None:
     from backend import config as _config
+    from backend.grammar import sanskrit_heritage as _shp
     from backend.models import embedding_client as _embedding
     from backend.models import llm_client as _llm
     from backend.rag import vector_store as _vs
@@ -36,6 +37,7 @@ def _reset_singletons() -> None:
     _config.get_settings.cache_clear()
     _llm.reset_llm_client()
     _embedding.reset_embedding_function()
+    _shp.reset_default_parser()
     _vs._client = None  # type: ignore[attr-defined]
     # Limiter holds bucket state in a process-global memory storage.
     # Drop any per-key counters between tests so previous tests don't

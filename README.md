@@ -3,15 +3,15 @@
 Local-first multi-agent AI for an ashram community. Five domains: Vedic
 text translation, student communication, infosec, survival skills, media.
 
-> **Phase 2 — Vedic Text Intelligence.** Multilingual embeddings via a
-> local `/v1/embeddings` server (LM Studio's `nomic-embed-text-v1.5`),
-> verse-aware Sanskrit chunking, hybrid (metadata-pinned + semantic) RAG
-> retrieval, ndjson token streaming, and per-browser conversation
-> history with persistent citations. ~2,100-chunk corpus covering the
-> full Bhagavad Gita (701 verses + 700 Sivananda commentaries), 10
-> Principal Upanishads, and one PDF-extracted commentary. JWT auth +
-> per-identity rate limits keep the chat endpoint protected, and a
-> 59-test pytest suite gates the backend. See
+> **Phase 3 — Communication & Multi-turn Memory.** All Phase 2 features
+> plus: per-thread multi-turn memory (the LLM sees the prior six
+> exchanges every reply), a thread sidebar in the UI with auto-titles,
+> a strengthened communication agent with FAQ-grounded RAG and a
+> conservative escalation detector (distress short-circuits the LLM
+> entirely and returns a fixed compassionate reply with crisis hotlines),
+> and an opt-in deterministic Sanskrit grammar parser via the Sanskrit
+> Heritage Platform (graceful fall-back to LLM-only when disabled or
+> unavailable). 86-test pytest suite gates the backend. See
 > [`vedanta_ai_cursor_prompt.md`](./vedanta_ai_cursor_prompt.md) for the
 > full multi-phase spec.
 
@@ -90,9 +90,10 @@ to `vedic_scholar` and return a real translation.
 |--------|----------------------------|-----------------------------------------------|
 | GET    | `/health`                  | Provider / embeddings / Chroma / DB probes + collection counts |
 | GET    | `/api/v1/agents`           | List of agent labels                          |
-| POST   | `/api/v1/chat`             | Classify → dispatch → persist (one JSON response) |
-| POST   | `/api/v1/chat/stream`      | Same, but ndjson stream: `intent` → `meta` → `token`* → `done`/`error` |
-| GET    | `/api/v1/messages`         | Recent exchanges (filter by `?user_id=`; auth users are auto-scoped to their own `user:N`) |
+| POST   | `/api/v1/chat`             | Classify → dispatch → persist (one JSON response). Accepts `thread_id` (optional); response always echoes the assigned id. |
+| POST   | `/api/v1/chat/stream`      | Same, but ndjson stream: `intent` → `meta` → `token`* → `done`/`error`. Stream events carry `thread_id`. |
+| GET    | `/api/v1/messages`         | Recent exchanges. Filter by `?user_id=` and/or `?thread_id=`; auth users are auto-scoped to their own `user:N`. |
+| GET    | `/api/v1/threads`          | Per-user thread list with first-message titles, message counts, and last-active timestamps. |
 | POST   | `/api/v1/auth/register`    | Create account, return JWT                     |
 | POST   | `/api/v1/auth/login`       | Exchange credentials for a JWT                 |
 | GET    | `/api/v1/auth/me`          | Current authenticated profile                  |
@@ -109,6 +110,72 @@ Tokens are HS256 JWTs signed with `SECRET_KEY` and live for
 `JWT_EXPIRE_MINUTES` (default 24 h). The frontend stores the token in
 `localStorage` under `vedanta:auth` and attaches it to every request as
 `Authorization: Bearer …`.
+
+## Multi-turn conversations
+
+Every chat call belongs to a `thread_id`. Omit it and the server
+mints a fresh one (`thread_<24-hex>`); echo it back on subsequent
+turns and the dispatcher feeds the prior six exchanges (twelve
+messages — capped to keep small local models fast) into the LLM as
+ordered `system → user → assistant → … → user` chat history.
+
+Threads are persisted on the same `messages` table used elsewhere,
+just with an additional `thread_id` column. `GET /api/v1/threads`
+returns a per-user listing newest-first with the first message as a
+title; the frontend renders this as a sidebar with a "+ New" button
+that starts a fresh thread. Switching threads in the UI re-hydrates
+its history from `GET /api/v1/messages?thread_id=...`.
+
+## Communication agent
+
+The `communication` agent answers visitor / student messages on
+behalf of the ashram. It now does three things before any LLM call:
+
+1. **Escalation classification** — keyword/phrase patterns flag
+   *distress* (suicidal ideation, harassment, abuse), *personal
+   guidance* (initiation, divorce, life decisions), and
+   *professional referral* (medical / legal / financial). Distress
+   short-circuits the LLM entirely and returns a fixed compassionate
+   reply that includes Indian crisis hotlines (iCall, Vandrevala).
+2. **RAG grounding** — semantic retrieval over the `communications`
+   collection (`data/communications/ashram_faq.jsonl` ships 19
+   curated chunks: visiting hours, daily schedule, donations, safe-
+   guarding policy, contacts, etc.). Hits are passed to the LLM as
+   a numbered "Ashram knowledge base" block.
+3. **Strong system prompt** — refuses theological claims, refuses
+   to invent Sanskrit verses, refuses worldly outcomes ("this will
+   heal you"), and always tags the reply with a `[classification:
+   <label>]` line so a future review queue can filter on it.
+
+Every reply persists with an `escalate` flag on the messages row,
+which downstream review tooling can use to prioritise human review.
+
+```bash
+python3 scripts/ingest_corpus.py \
+    --collection communications \
+    --dir data/communications/ \
+    --format jsonl
+```
+
+## Sanskrit grammar (deterministic parser)
+
+The `sanskrit_grammar` agent can call the **Sanskrit Heritage
+Platform** (Inria) before the LLM to get a deterministic
+morphological breakdown (sandhi splits, root forms, case endings)
+that the LLM then explains in natural language. This is **opt-in**:
+
+```env
+SANSKRIT_HERITAGE_ENABLED=true
+SANSKRIT_HERITAGE_BASE_URL=https://sanskrit.inria.fr/cgi-bin/SKT/sktreader.cgi
+```
+
+When disabled (default) or unavailable (timeout / 5xx), the agent
+gracefully falls back to LLM-only analysis and the
+`structural_parser_used` field on the response metadata records
+the outcome. The integration is intentionally network-tolerant so
+running offline never breaks the chat path. For production we
+recommend a self-hosted Docker SHP image; the public Inria server
+is fine for development.
 
 ## RAG corpus
 
@@ -172,23 +239,26 @@ fabricate Sanskrit.
 
 ## Tests
 
-The backend ships with an offline-friendly pytest suite (chunker,
-classifier, retriever, dispatcher, LLM/embedding clients, database,
-auth, rate-limiting). All HTTP traffic is mocked with `respx` and
-ChromaDB runs in-memory, so the suite is fully hermetic.
+The backend ships with an offline-friendly pytest suite covering
+chunker, classifier, retriever, dispatcher, LLM / embedding
+clients, database, auth, rate-limiting, multi-turn threading,
+communication-agent escalation, and the Sanskrit Heritage parser.
+All HTTP traffic is mocked with `respx` and ChromaDB runs
+in-memory, so the suite is fully hermetic.
 
 ```bash
 python3 -m pip install --user pytest pytest-asyncio respx pytest-httpx
 python3 -m pytest -q
 ```
 
-Expect ~3–5 seconds for 59 tests on a warm machine.
+Expect ~5–8 seconds for 86 tests on a warm machine (the agent
+end-to-end tests dominate the wall-clock).
 
 ## Layout
 
 ```
-backend/    FastAPI server, agents, RAG, security (auth + rate-limit)
-frontend/   Next.js + Tailwind chat UI
+backend/    FastAPI server, agents, RAG, grammar, security (auth + rate-limit)
+frontend/   Next.js + Tailwind chat UI (with thread sidebar + auth bar)
 data/       Source corpora + ChromaDB persistence
 docs/adr/   Architecture decision records
 scripts/    One-off operational scripts

@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -37,6 +38,7 @@ from .schemas import (
     ChatResponse,
     LoginRequest,
     RegisterRequest,
+    ThreadSummary,
     TokenResponse,
     UserProfile,
 )
@@ -133,6 +135,35 @@ def create_app() -> FastAPI:
             )
         return await intent_classifier.classify(req.message)
 
+    def _ensure_thread_id(req: ChatRequest) -> str:
+        if req.thread_id and req.thread_id.strip():
+            return req.thread_id.strip()[:64]
+        return f"thread_{uuid.uuid4().hex[:24]}"
+
+    async def _build_thread_context(
+        thread_id: str, user_id: str | None
+    ) -> list[dict[str, Any]]:
+        """Load recent thread turns formatted for LLM consumption.
+
+        Each prior exchange becomes two messages (user + assistant).
+        """
+        try:
+            rows = await database.load_thread_history(
+                thread_id, user_id=user_id, limit=6
+            )
+        except Exception as exc:  # noqa: BLE001 - history failure shouldn't block reply
+            logger.warning("thread history load failed for %s: %s", thread_id, exc)
+            return []
+        history: list[dict[str, Any]] = []
+        for row in rows:
+            user_text = row.get("query")
+            assistant_text = row.get("response")
+            if isinstance(user_text, str) and user_text.strip():
+                history.append({"role": "user", "content": user_text})
+            if isinstance(assistant_text, str) and assistant_text.strip():
+                history.append({"role": "assistant", "content": assistant_text})
+        return history
+
     @app.post("/api/v1/chat", response_model=ChatResponse)
     @limiter.limit(chat_limit)
     async def chat(
@@ -143,19 +174,27 @@ def create_app() -> FastAPI:
         client_ip = request.client.host if request.client else None
         if user is not None and not req.user_id:
             req.user_id = user.subject
+        thread_id = _ensure_thread_id(req)
         intent = await _resolve_intent(req)
+        thread_history = await _build_thread_context(thread_id, req.user_id)
 
         try:
             agent_response = await dispatcher.dispatch(
                 agent=intent.agent,
                 query=req.message,
-                context={"user_id": req.user_id, "intent": intent.model_dump()},
+                context={
+                    "user_id": req.user_id,
+                    "thread_id": thread_id,
+                    "thread_history": thread_history,
+                    "intent": intent.model_dump(),
+                },
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         await database.save_message(
             user_id=req.user_id,
+            thread_id=thread_id,
             agent=intent.agent,
             intent_confidence=intent.confidence,
             query=req.message,
@@ -165,6 +204,7 @@ def create_app() -> FastAPI:
                 "rationale": intent.rationale,
             },
             citations=agent_response.citations,
+            escalate=agent_response.escalate,
         )
         await audit_log.record(
             endpoint="/api/v1/chat",
@@ -172,7 +212,10 @@ def create_app() -> FastAPI:
             user_id=req.user_id,
             ip_address=client_ip,
             status_code=200,
-            detail=f"agent={intent.agent} confidence={intent.confidence:.2f}",
+            detail=(
+                f"agent={intent.agent} confidence={intent.confidence:.2f} "
+                f"thread={thread_id} escalate={agent_response.escalate}"
+            ),
         )
 
         return ChatResponse(
@@ -182,6 +225,7 @@ def create_app() -> FastAPI:
             citations=agent_response.citations,
             metadata=agent_response.metadata,
             escalate=agent_response.escalate,
+            thread_id=thread_id,
             created_at=datetime.now(timezone.utc),
         )
 
@@ -207,7 +251,9 @@ def create_app() -> FastAPI:
         client_ip = request.client.host if request.client else None
         if user is not None and not req.user_id:
             req.user_id = user.subject
+        thread_id = _ensure_thread_id(req)
         intent = await _resolve_intent(req)
+        thread_history = await _build_thread_context(thread_id, req.user_id)
 
         async def generator() -> AsyncIterator[bytes]:
             def encode(event: dict[str, Any]) -> bytes:
@@ -221,6 +267,7 @@ def create_app() -> FastAPI:
                     "agent": intent.agent,
                     "confidence": intent.confidence,
                     "rationale": intent.rationale,
+                    "thread_id": thread_id,
                 }
             )
 
@@ -238,6 +285,8 @@ def create_app() -> FastAPI:
                     query=req.message,
                     context={
                         "user_id": req.user_id,
+                        "thread_id": thread_id,
+                        "thread_history": thread_history,
                         "intent": intent.model_dump(),
                     },
                 ):
@@ -252,12 +301,17 @@ def create_app() -> FastAPI:
                             text_parts.append(delta)
                     elif etype == "done":
                         final_text = event.get("text") or "".join(text_parts).strip()
-                        # Enrich the agent's terminal event with timestamp.
-                        event = {**event, "created_at": datetime.now(timezone.utc).isoformat()}
+                        # Enrich the agent's terminal event with timestamp + thread.
+                        event = {
+                            **event,
+                            "thread_id": thread_id,
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        }
                         saw_terminal = True
                     elif etype == "error":
                         captured_error = event.get("message") or "stream error"
                         final_text = event.get("text") or "".join(text_parts).strip()
+                        event = {**event, "thread_id": thread_id}
                         saw_terminal = True
                     yield encode(event)
             except ValueError as exc:
@@ -280,6 +334,7 @@ def create_app() -> FastAPI:
                     {
                         "type": "done",
                         "text": persisted_text,
+                        "thread_id": thread_id,
                         "created_at": datetime.now(timezone.utc).isoformat(),
                         "incomplete": True,
                     }
@@ -288,6 +343,7 @@ def create_app() -> FastAPI:
             try:
                 await database.save_message(
                     user_id=req.user_id,
+                    thread_id=thread_id,
                     agent=intent.agent,
                     intent_confidence=intent.confidence,
                     query=req.message,
@@ -299,6 +355,7 @@ def create_app() -> FastAPI:
                         **({"error": captured_error} if captured_error else {}),
                     },
                     citations=captured_citations,
+                    escalate=captured_escalate,
                 )
                 await audit_log.record(
                     endpoint="/api/v1/chat/stream",
@@ -309,6 +366,7 @@ def create_app() -> FastAPI:
                     detail=(
                         f"agent={intent.agent} "
                         f"confidence={intent.confidence:.2f} "
+                        f"thread={thread_id} "
                         f"escalate={captured_escalate} "
                         f"error={captured_error or '-'}"
                     ),
@@ -326,6 +384,7 @@ def create_app() -> FastAPI:
     async def messages(
         limit: int = 50,
         user_id: str | None = None,
+        thread_id: str | None = Query(default=None, max_length=64),
         user: AuthenticatedUser | None = Depends(auth.current_user_optional),
     ) -> dict[str, list[dict[str, object]]]:
         if limit <= 0 or limit > 500:
@@ -334,8 +393,35 @@ def create_app() -> FastAPI:
         # callers may pass `user_id` (their localStorage id) to scope.
         if user is not None:
             user_id = user.subject
-        rows = await database.list_recent_messages(limit=limit, user_id=user_id)
+        rows = await database.list_recent_messages(
+            limit=limit, user_id=user_id, thread_id=thread_id
+        )
         return {"messages": rows}
+
+    @app.get("/api/v1/threads", response_model=dict[str, list[ThreadSummary]])
+    async def threads(
+        limit: int = 50,
+        user_id: str | None = None,
+        user: AuthenticatedUser | None = Depends(auth.current_user_optional),
+    ) -> dict[str, list[ThreadSummary]]:
+        if limit <= 0 or limit > 200:
+            raise HTTPException(status_code=400, detail="limit must be in (0, 200]")
+        if user is not None:
+            user_id = user.subject
+        rows = await database.list_threads(user_id=user_id, limit=limit)
+        return {
+            "threads": [
+                ThreadSummary(
+                    thread_id=row["thread_id"],
+                    title=row.get("title"),
+                    message_count=row["message_count"],
+                    last_active_at=row["last_active_at"],
+                    started_at=row["started_at"],
+                    last_agent=row.get("last_agent"),
+                )
+                for row in rows
+            ]
+        }
 
     @app.post("/api/v1/auth/register", response_model=TokenResponse)
     @limiter.limit(auth_limit)

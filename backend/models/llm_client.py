@@ -9,6 +9,12 @@ surface:
 
 Selection is driven by the `LLM_PROVIDER` env var. All LLM traffic in
 the system MUST go through this module per `.cursorrules`.
+
+Both providers support a `/chat`-style messages array, so we expose a
+single ``complete_messages``/``complete_messages_stream`` pair that
+takes the canonical OpenAI-style list (``[{"role":..., "content":...}, ...]``).
+The single-turn ``complete`` / ``complete_stream`` helpers are kept as
+thin wrappers for callers that don't need history.
 """
 
 from __future__ import annotations
@@ -22,6 +28,29 @@ import httpx
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
+
+ChatMessage = dict[str, str]
+
+
+def _build_messages(
+    system_prompt: str,
+    user_message: str,
+    history: list[ChatMessage] | None = None,
+) -> list[ChatMessage]:
+    """Compose a system + history + user message list.
+
+    `history` is a sequence of ``{"role": "user"|"assistant", "content": "..."}``
+    entries in chronological order. The system prompt always goes first.
+    """
+    messages: list[ChatMessage] = [{"role": "system", "content": system_prompt}]
+    if history:
+        for item in history:
+            role = item.get("role")
+            content = item.get("content")
+            if role in ("user", "assistant") and isinstance(content, str) and content:
+                messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user_message})
+    return messages
 
 
 class LLMUnavailableError(RuntimeError):
@@ -48,6 +77,24 @@ class LLMClient(Protocol):
         self,
         system_prompt: str,
         user_message: str,
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]: ...
+
+    async def complete_messages(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> str: ...
+
+    def complete_messages_stream(
+        self,
+        messages: list[ChatMessage],
         *,
         model: str | None = None,
         temperature: float = 0.2,
@@ -81,10 +128,9 @@ class OllamaClient:
     def base_url(self) -> str:
         return self._base_url
 
-    async def complete(
+    async def complete_messages(
         self,
-        system_prompt: str,
-        user_message: str,
+        messages: list[ChatMessage],
         *,
         model: str | None = None,
         temperature: float = 0.2,
@@ -92,14 +138,10 @@ class OllamaClient:
     ) -> str:
         payload: dict[str, Any] = {
             "model": model or self._default_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": list(messages),
             "stream": False,
             "options": {"temperature": temperature, **(extra_options or {})},
         }
-
         url = f"{self._base_url}/api/chat"
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -118,10 +160,25 @@ class OllamaClient:
             raise LLMUnavailableError("Ollama returned an empty response.")
         return content.strip()
 
-    async def complete_stream(
+    async def complete(
         self,
         system_prompt: str,
         user_message: str,
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> str:
+        return await self.complete_messages(
+            _build_messages(system_prompt, user_message),
+            model=model,
+            temperature=temperature,
+            extra_options=extra_options,
+        )
+
+    async def complete_messages_stream(
+        self,
+        messages: list[ChatMessage],
         *,
         model: str | None = None,
         temperature: float = 0.2,
@@ -135,10 +192,7 @@ class OllamaClient:
         """
         payload: dict[str, Any] = {
             "model": model or self._default_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": list(messages),
             "stream": True,
             "options": {"temperature": temperature, **(extra_options or {})},
         }
@@ -164,6 +218,23 @@ class OllamaClient:
             raise LLMUnavailableError(
                 f"Ollama at {self._base_url} is unreachable: {exc}"
             ) from exc
+
+    async def complete_stream(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]:
+        async for delta in self.complete_messages_stream(
+            _build_messages(system_prompt, user_message),
+            model=model,
+            temperature=temperature,
+            extra_options=extra_options,
+        ):
+            yield delta
 
     async def is_available(self) -> bool:
         try:
@@ -248,10 +319,9 @@ class OpenAICompatibleClient:
             )
         return model_id
 
-    async def complete(
+    async def complete_messages(
         self,
-        system_prompt: str,
-        user_message: str,
+        messages: list[ChatMessage],
         *,
         model: str | None = None,
         temperature: float = 0.2,
@@ -260,15 +330,11 @@ class OpenAICompatibleClient:
         chosen_model = await self._resolve_model(model)
         payload: dict[str, Any] = {
             "model": chosen_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": list(messages),
             "stream": False,
             "temperature": temperature,
             **(extra_options or {}),
         }
-
         url = f"{self._base_url}/chat/completions"
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -290,10 +356,25 @@ class OpenAICompatibleClient:
             raise LLMUnavailableError("OpenAI-compatible server returned empty content.")
         return content.strip()
 
-    async def complete_stream(
+    async def complete(
         self,
         system_prompt: str,
         user_message: str,
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> str:
+        return await self.complete_messages(
+            _build_messages(system_prompt, user_message),
+            model=model,
+            temperature=temperature,
+            extra_options=extra_options,
+        )
+
+    async def complete_messages_stream(
+        self,
+        messages: list[ChatMessage],
         *,
         model: str | None = None,
         temperature: float = 0.2,
@@ -308,10 +389,7 @@ class OpenAICompatibleClient:
         chosen_model = await self._resolve_model(model)
         payload: dict[str, Any] = {
             "model": chosen_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": list(messages),
             "stream": True,
             "temperature": temperature,
             **(extra_options or {}),
@@ -346,6 +424,23 @@ class OpenAICompatibleClient:
             raise LLMUnavailableError(
                 f"OpenAI-compatible server at {self._base_url} is unreachable: {exc}"
             ) from exc
+
+    async def complete_stream(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]:
+        async for delta in self.complete_messages_stream(
+            _build_messages(system_prompt, user_message),
+            model=model,
+            temperature=temperature,
+            extra_options=extra_options,
+        ):
+            yield delta
 
     async def is_available(self) -> bool:
         try:

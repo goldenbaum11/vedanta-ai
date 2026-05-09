@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AgentSelector } from "@/components/AgentSelector";
 import { AuthBar } from "@/components/AuthBar";
+import { ThreadList } from "@/components/ThreadList";
 import { TranslationCard } from "@/components/TranslationCard";
 import {
   AGENT_LABELS,
@@ -67,6 +68,22 @@ function rowToTurns(row: MessageRow): ChatTurn[] {
   return [userTurn, assistantTurn];
 }
 
+const ACTIVE_THREAD_KEY = "vedanta:activeThreadId";
+
+function readStoredActiveThread(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(ACTIVE_THREAD_KEY);
+}
+
+function writeStoredActiveThread(value: string | null): void {
+  if (typeof window === "undefined") return;
+  if (value) {
+    window.localStorage.setItem(ACTIVE_THREAD_KEY, value);
+  } else {
+    window.localStorage.removeItem(ACTIVE_THREAD_KEY);
+  }
+}
+
 export function ChatWindow() {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
@@ -77,21 +94,42 @@ export function ChatWindow() {
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(
     () => getStoredAuth()?.profile ?? null,
   );
+  const [activeThreadId, setActiveThreadIdState] = useState<string | null>(
+    () => readStoredActiveThread(),
+  );
+  const [threadListVersion, setThreadListVersion] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Resolve a stable per-browser id and hydrate previous conversation.
-  // The "ownership" key for history is `user:N` when signed in, or the
-  // anonymous browser id otherwise. When the user signs in/out we
-  // re-hydrate against the appropriate key.
+  const setActiveThreadId = useCallback((value: string | null) => {
+    setActiveThreadIdState(value);
+    writeStoredActiveThread(value);
+  }, []);
+
+  // Resolve the user id: `user:N` when signed in, anonymous browser id
+  // otherwise. Auth changes re-trigger the message fetch.
   useEffect(() => {
     const anonId = getOrCreateUserId();
     const effectiveId = authProfile ? `user:${authProfile.id}` : anonId;
     setUserId(effectiveId);
+  }, [authProfile]);
+
+  // Hydrate conversation when active thread (or user) changes. When
+  // there's no active thread we show an empty chat (the user is
+  // composing the first message of a new thread).
+  useEffect(() => {
+    if (!userId) return;
     let cancelled = false;
+    if (!activeThreadId) {
+      setTurns([]);
+      setHydrating(false);
+      return () => {
+        cancelled = true;
+      };
+    }
     setHydrating(true);
     (async () => {
       try {
-        const { messages: rows } = await fetchMessages(50, effectiveId);
+        const { messages: rows } = await fetchMessages(50, userId, activeThreadId);
         if (cancelled) return;
         // DB returns newest-first; we want chronological order in the UI.
         const reversed = [...rows].reverse();
@@ -107,7 +145,7 @@ export function ChatWindow() {
     return () => {
       cancelled = true;
     };
-  }, [authProfile]);
+  }, [userId, activeThreadId]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -143,15 +181,22 @@ export function ChatWindow() {
       );
     };
 
+    let assignedThreadId: string | null = activeThreadId;
+
     try {
       const stream = streamChat({
         message,
         user_id: userId || null,
+        thread_id: activeThreadId,
         agent_override: agentOverride === "auto" ? null : agentOverride,
       });
       for await (const event of stream) {
         switch (event.type) {
           case "intent":
+            if (event.thread_id && !assignedThreadId) {
+              assignedThreadId = event.thread_id;
+              setActiveThreadId(event.thread_id);
+            }
             updateAssistant((t) => ({
               ...t,
               agent: event.agent,
@@ -170,6 +215,10 @@ export function ChatWindow() {
             updateAssistant((t) => ({ ...t, text: t.text + event.delta }));
             break;
           case "done":
+            if (event.thread_id && !assignedThreadId) {
+              assignedThreadId = event.thread_id;
+              setActiveThreadId(event.thread_id);
+            }
             updateAssistant((t) => ({
               ...t,
               text: event.text || t.text,
@@ -213,14 +262,14 @@ export function ChatWindow() {
       ]);
     } finally {
       setBusy(false);
+      setThreadListVersion((v) => v + 1);
     }
-  }, [agentOverride, busy, input, userId]);
+  }, [activeThreadId, agentOverride, busy, input, setActiveThreadId, userId]);
 
-  const clearLocalView = useCallback(() => {
+  const startNewConversation = useCallback(() => {
+    setActiveThreadId(null);
     setTurns([]);
-  }, []);
-
-  const turnCount = useMemo(() => turns.length, [turns]);
+  }, [setActiveThreadId]);
 
   return (
     <section className="flex h-[calc(100vh-10rem)] flex-col gap-3">
@@ -228,17 +277,6 @@ export function ChatWindow() {
         <h1 className="font-serif text-2xl font-semibold">Ashram Chat</h1>
         <div className="flex flex-wrap items-center gap-2">
           <AuthBar onAuthStateChange={setAuthProfile} />
-          {turnCount > 0 ? (
-            <button
-              type="button"
-              onClick={clearLocalView}
-              disabled={busy}
-              title="Hides the current view; does not delete server-side history."
-              className="rounded-md border border-ink-200 px-2 py-1 text-xs text-ink-600 transition hover:bg-ink-50 disabled:opacity-50 dark:border-ink-700 dark:text-ink-300 dark:hover:bg-ink-800"
-            >
-              New conversation
-            </button>
-          ) : null}
           <AgentSelector
             value={agentOverride}
             onChange={setAgentOverride}
@@ -247,57 +285,79 @@ export function ChatWindow() {
         </div>
       </div>
 
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto rounded-lg border border-ink-200 bg-white p-4 shadow-sm dark:border-ink-800 dark:bg-ink-900"
-      >
-        {hydrating ? (
-          <HydratingState />
-        ) : turns.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <ul className="space-y-4">
-            {turns.map((turn) => (
-              <li key={turn.id}>
-                <TurnBubble turn={turn} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden md:grid-cols-[14rem_1fr]">
+        <div className="hidden md:flex md:h-full md:overflow-hidden">
+          <ThreadList
+            activeThreadId={activeThreadId}
+            onSelect={(id) => {
+              if (id === null) {
+                startNewConversation();
+              } else {
+                setActiveThreadId(id);
+              }
+            }}
+            refreshKey={threadListVersion}
+          />
+        </div>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-        className="flex flex-col gap-2 rounded-lg border border-ink-200 bg-white p-3 shadow-sm dark:border-ink-800 dark:bg-ink-900"
-      >
-        <textarea
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        <div className="flex h-full flex-col gap-2 overflow-hidden">
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto rounded-lg border border-ink-200 bg-white p-4 shadow-sm dark:border-ink-800 dark:bg-ink-900"
+          >
+            {hydrating ? (
+              <HydratingState />
+            ) : turns.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <ul className="space-y-4">
+                {turns.map((turn) => (
+                  <li key={turn.id}>
+                    <TurnBubble turn={turn} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <form
+            onSubmit={(event) => {
               event.preventDefault();
               void submit();
-            }
-          }}
-          placeholder="Ask about a verse, request a transcription, report an anomaly..."
-          rows={3}
-          disabled={busy}
-          className="w-full resize-none rounded-md border border-ink-200 bg-white p-2 text-sm focus:border-saffron-500 focus:outline-none focus:ring-2 focus:ring-saffron-300 disabled:opacity-50 dark:border-ink-700 dark:bg-ink-950"
-        />
-        <div className="flex items-center justify-between text-xs text-ink-500">
-          <span>Press ⌘/Ctrl + Enter to send</span>
-          <button
-            type="submit"
-            disabled={busy || !input.trim()}
-            className="rounded-md bg-saffron-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-saffron-700 disabled:cursor-not-allowed disabled:opacity-50"
+            }}
+            className="flex flex-col gap-2 rounded-lg border border-ink-200 bg-white p-3 shadow-sm dark:border-ink-800 dark:bg-ink-900"
           >
-            {busy ? "Thinking..." : "Send"}
-          </button>
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder={
+                activeThreadId
+                  ? "Continue this conversation..."
+                  : "Start a new conversation. Ask about a verse, request a transcription, report an anomaly..."
+              }
+              rows={3}
+              disabled={busy}
+              className="w-full resize-none rounded-md border border-ink-200 bg-white p-2 text-sm focus:border-saffron-500 focus:outline-none focus:ring-2 focus:ring-saffron-300 disabled:opacity-50 dark:border-ink-700 dark:bg-ink-950"
+            />
+            <div className="flex items-center justify-between text-xs text-ink-500">
+              <span>Press ⌘/Ctrl + Enter to send</span>
+              <button
+                type="submit"
+                disabled={busy || !input.trim()}
+                className="rounded-md bg-saffron-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-saffron-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy ? "Thinking..." : "Send"}
+              </button>
+            </div>
+          </form>
         </div>
-      </form>
+      </div>
     </section>
   );
 }
