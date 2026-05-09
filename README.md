@@ -1,89 +1,31 @@
 # Vedanta AI
 
-Local-first multi-agent AI system for an ashram community. Five domains:
-Vedic text translation, student communication, infrastructure security,
-survival/practical knowledge, and media processing.
+Local-first multi-agent AI for an ashram community. Five domains: Vedic
+text translation, student communication, infosec, survival skills, media.
 
-> **Status:** Phase 1 — Foundation (FastAPI + Ollama + intent router +
-> Next.js chat UI + SQLite + ChromaDB). Agents return stub responses until
-> their domain phase is implemented. See
+> **Phase 1 — Foundation.** FastAPI + intent router + 6 agent stubs +
+> Next.js chat UI + SQLite + ChromaDB. See
 > [`vedanta_ai_cursor_prompt.md`](./vedanta_ai_cursor_prompt.md) for the
 > full multi-phase spec.
 
 ## Architecture
 
 ```
-User ─▶ Next.js chat UI ─▶ FastAPI /api/v1/chat
-                                  │
-                          Intent classifier
-                                  │
-                          Dispatcher  ─▶  Agent (Vedic / Sanskrit /
-                                          Communication / InfoSec /
-                                          Survival / Media)
-                                  │
-                          ┌───────┼────────┐
-                          ▼       ▼        ▼
-                       SQLite   ChromaDB  Ollama
-                       (state)  (RAG)     (LLM, local)
+UI ─▶ FastAPI /api/v1/chat ─▶ Classifier ─▶ Dispatcher ─▶ Agent
+                                                    │
+                                       SQLite · ChromaDB · LLM (local)
 ```
 
 ## Prerequisites
 
-- macOS / Linux
-- **Python 3.9+** (3.11+ recommended; 3.9 supported via `eval_type_backport`)
-- **Node.js 20+**
-- A local LLM server — either **[Ollama](https://ollama.com)** (default)
-  or any **OpenAI-compatible** server (LM Studio, llama.cpp `--server`,
-  vLLM, Jan, etc.)
-- (Phase 6) FFmpeg + Tesseract installed system-wide
+- Python 3.9+ (3.11+ recommended; 3.9 supported via `eval_type_backport`)
+- Node.js 20+
+- A local LLM: **[Ollama](https://ollama.com)** *or* any OpenAI-compatible
+  server (LM Studio, llama.cpp, vLLM, Jan)
 
 ## Quickstart
 
-### 1. Bring up a local LLM
-
-Pick one provider. The choice is controlled by `LLM_PROVIDER` in `.env`.
-
-#### Option A — Ollama (default)
-
-```bash
-brew install ollama
-brew services start ollama         # or run `ollama serve` in a separate terminal
-ollama pull llama3                 # ~4.7 GB. Smaller alt: `ollama pull llama3.2:3b`
-```
-
-Sanity check: `curl http://localhost:11434/api/tags` should return JSON.
-
-In `.env`:
-
-```env
-LLM_PROVIDER=ollama
-OLLAMA_DEFAULT_MODEL=llama3
-```
-
-#### Option B — LM Studio (OpenAI-compatible)
-
-Recommended on macOS Tahoe + Apple Silicon, where Ollama 0.23.2 currently
-has GPU regressions (see Troubleshooting).
-
-```bash
-brew install --cask lm-studio
-open -a "LM Studio"
-```
-
-In LM Studio: download a model (e.g. `Llama 3.2 3B Instruct`), then click
-**Developer → Local Server → Start Server** (default port `1234`).
-
-Sanity check: `curl http://localhost:1234/v1/models` should list the loaded model.
-
-In `.env`:
-
-```env
-LLM_PROVIDER=openai_compatible
-OPENAI_COMPATIBLE_BASE_URL=http://localhost:1234/v1
-OPENAI_COMPATIBLE_MODEL=                    # leave empty to auto-pick whatever is loaded
-```
-
-### 2. Configure environment
+### 1. Configure
 
 ```bash
 cp .env.example .env
@@ -91,31 +33,34 @@ echo "SECRET_KEY=$(openssl rand -hex 32)" >> .env
 echo "ENCRYPTION_KEY=$(openssl rand -hex 32)" >> .env
 ```
 
-If you pulled a model other than `llama3`, set `OLLAMA_DEFAULT_MODEL` in `.env`.
+### 2. Start a local LLM (pick one)
 
-### 3. Backend
+**Ollama (default)** — set `LLM_PROVIDER=ollama` in `.env`:
 
-Run from the **project root** (package-relative imports require it):
+```bash
+brew install ollama && brew services start ollama
+ollama pull llama3            # or llama3.2:3b
+```
+
+**LM Studio (recommended on macOS 26 + Apple Silicon)** — set
+`LLM_PROVIDER=openai_compatible` in `.env`, install via
+`brew install --cask lm-studio`, open the app, load a model, and start
+**Developer → Local Server** (port 1234). Leave
+`OPENAI_COMPATIBLE_MODEL=` empty to auto-pick whatever's loaded.
+
+### 3. Backend (run from project root)
 
 ```bash
 python3 -m pip install --user -r backend/requirements.txt
 python3 -m uvicorn backend.main:app --reload --port 8000
 ```
 
-- Health: <http://localhost:8000/health>
-- OpenAPI docs: <http://localhost:8000/docs>
-
-> Using a venv is cleaner if your Python install supports it:
-> `python3 -m venv .venv && source .venv/bin/activate && pip install -r backend/requirements.txt`.
+Health: <http://localhost:8000/health> · Docs: <http://localhost:8000/docs>
 
 ### 4. Frontend
 
-In a second terminal:
-
 ```bash
-cd frontend
-npm install
-npm run dev
+cd frontend && npm install && npm run dev
 ```
 
 Open <http://localhost:3000>.
@@ -126,89 +71,58 @@ Open <http://localhost:3000>.
 curl -s http://127.0.0.1:8000/health | python3 -m json.tool
 curl -s -X POST http://127.0.0.1:8000/api/v1/chat \
   -H 'Content-Type: application/json' \
-  -d '{"message": "Translate Bhagavad Gita 2.47 with three layers of meaning"}' \
-  | python3 -m json.tool
+  -d '{"message":"Translate Bhagavad Gita 2.47"}' | python3 -m json.tool
 ```
 
-`/health` should show `llm.reachable: true` (with the active `provider`)
-and `chroma.reachable: true`. The chat call should route to
-`vedic_scholar` and return a real LLM response.
+`/health` should show `llm.reachable: true`. The chat call should route
+to `vedic_scholar` and return a real translation.
 
-## API surface (Phase 1)
+## API (Phase 1)
 
-| Method | Path                  | Purpose                                          |
-|--------|-----------------------|--------------------------------------------------|
-| GET    | `/health`             | Liveness + Ollama / Chroma / DB probes           |
-| GET    | `/api/v1/agents`      | List of supported agent labels                   |
-| POST   | `/api/v1/chat`        | Classify, dispatch to agent, persist, return     |
-| GET    | `/api/v1/messages`    | Recent message exchanges (admin view)            |
-
-`POST /api/v1/chat` accepts an optional `agent_override` to bypass the
-classifier — useful for testing each agent in isolation.
+| Method | Path                | Purpose                                       |
+|--------|---------------------|-----------------------------------------------|
+| GET    | `/health`           | Provider / Chroma / DB probes                 |
+| GET    | `/api/v1/agents`    | List of agent labels                          |
+| POST   | `/api/v1/chat`      | Classify → dispatch → persist (`agent_override` to bypass) |
+| GET    | `/api/v1/messages`  | Recent exchanges                              |
 
 ## (Phase 2+) Ingest a corpus
 
-Place text/markdown files under `data/vedic_texts/`, then:
-
 ```bash
-python3 scripts/ingest_corpus.py \
-  --collection vedic_texts \
-  --dir data/vedic_texts/
+python3 scripts/ingest_corpus.py --collection vedic_texts --dir data/vedic_texts/
 ```
 
-Phase 1 supports plain-text and markdown. PDF + verse-aware Sanskrit
-chunking arrives in Phase 2.
+Plain-text/markdown only in Phase 1. PDF + verse-aware Sanskrit chunking
+arrives in Phase 2.
 
-## Repository layout
+## Layout
 
 ```
-vedanta-ai/
-├── backend/        FastAPI server, agents, RAG, security
-├── frontend/       Next.js + Tailwind chat UI
-├── data/           Source corpora + ChromaDB persistence
-├── scripts/        One-off operational scripts
-├── .cursorrules    AI coding-assistant guardrails
-└── .env.example    Configuration template
+backend/    FastAPI server, agents, RAG, security
+frontend/   Next.js + Tailwind chat UI
+data/       Source corpora + ChromaDB persistence
+scripts/    One-off operational scripts
 ```
 
-## Development conventions
+## Conventions
 
 - All LLM calls go through `backend/models/llm_client.py`.
-- Each agent exposes `async def handle(query: str, context: dict) -> AgentResponse`.
+- Each agent exposes `async def handle(query, context) -> AgentResponse`.
 - Agents never call each other — routing is the dispatcher's job.
-- Every endpoint that touches PII writes to the `audit_logs` table.
-- See [`.cursorrules`](./.cursorrules) for the full house style.
+- Every endpoint that touches PII writes to `audit_logs`.
+- Full house style in [`.cursorrules`](./.cursorrules).
 
 ## Troubleshooting
 
-- **`zsh: command not found: python3.11`** — use `python3` instead. Any
-  3.9+ works; the backport package handles 3.9 union-syntax for pydantic.
-- **`llm.reachable: false`** in `/health` — start the configured
-  provider. For Ollama: `brew services start ollama` (or `ollama serve`).
-  For LM Studio: open the app → Developer → Local Server → Start Server.
-- **`pyexpat` ImportError on Homebrew Python** — your Homebrew Python and
-  `expat` got out of sync. Fix with `brew reinstall expat python@3.12`,
-  or fall back to the system `python3`.
-- **CORS errors from the frontend** — confirm `CORS_ORIGINS` in `.env`
-  contains `http://localhost:3000` (default).
-- **Ollama inference times out / extreme slowness on macOS 26 (Tahoe) +
-  Apple Silicon, Ollama 0.23.2 (Homebrew):** GPU discovery fails
-  (`failure during GPU discovery: failed to finish discovery before
-  timeout` in `/opt/homebrew/var/log/ollama.log`), and the runner falls
-  back to CPU at degraded performance — even a 3B model can take >90 s
-  to produce one token. This is an upstream Ollama issue specific to
-  that OS/version combo. Workarounds:
-  1. Install the official **[Ollama desktop app](https://ollama.com/download)**
-     from the .dmg instead of the brew bottle — it ships with a different
-     Metal backend that often works when the CLI bottle does not.
-  2. **Switch to LM Studio** (already wired). Set `LLM_PROVIDER=openai_compatible`
-     in `.env`, install via `brew install --cask lm-studio`, load a model
-     in the GUI, and start its local server on port 1234.
-  3. While waiting, the rest of the system runs in **graceful
-     degradation mode**: agents return clearly-labelled stub envelopes
-     and `/health` reports `ollama.reachable: false`. You can still
-     develop and test the classifier, dispatcher, RAG ingestion, and
-     UI without Ollama up.
+- **`llm.reachable: false`** — start the configured provider
+  (`brew services start ollama` or LM Studio's local server).
+- **Ollama 0.23.2 hangs / times out on macOS 26 + Apple Silicon** — known
+  GPU-discovery regression (CPU fallback is unusable). Switch to LM Studio
+  per step 2 above, or install the official Ollama `.dmg`.
+- **`pyexpat` ImportError on Homebrew Python** — `brew reinstall expat
+  python@3.12`, or fall back to the system `python3`.
+- **`zsh: command not found: python3.11`** — just use `python3`; the
+  backport handles 3.9 union syntax for pydantic.
 
 ## License
 
