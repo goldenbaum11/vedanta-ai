@@ -39,6 +39,16 @@ class Settings(BaseSettings):
     openai_compatible_api_key: str = "lm-studio"
     openai_compatible_timeout_seconds: float = 120.0
 
+    # Embeddings. "default" uses ChromaDB's bundled all-MiniLM-L6-v2
+    # (English-only). "openai_compatible" hits a /v1/embeddings endpoint
+    # (recommended; LM Studio's nomic-embed-text-v1.5 is multilingual and
+    # works for Sanskrit/Devanagari). "ollama" hits Ollama's /api/embed.
+    embedding_provider: Literal["default", "openai_compatible", "ollama"] = "default"
+    embedding_base_url: str = ""  # empty -> reuse the matching LLM provider URL
+    embedding_model: str = "text-embedding-nomic-embed-text-v1.5"
+    embedding_api_key: str = ""  # empty -> reuse openai_compatible_api_key
+    embedding_timeout_seconds: float = 60.0
+
     database_url: str = f"sqlite:///{PROJECT_ROOT / 'vedanta.db'}"
     chroma_persist_dir: str = str(PROJECT_ROOT / "data" / "chroma")
 

@@ -1,10 +1,16 @@
 """One-shot corpus ingestion runner.
 
-Usage:
+Examples:
+    # Ingest a directory, auto-detecting format per file
     python scripts/ingest_corpus.py --collection vedic_texts --dir data/vedic_texts/
 
-Phase 1 supports plain-text / markdown only. Phase 2 will add PDFs and
-verse-aware chunking for Sanskrit sources.
+    # Force JSONL format and reset the collection first (use when you've
+    # changed EMBEDDING_PROVIDER and the old vectors are incompatible).
+    python scripts/ingest_corpus.py \\
+        --collection vedic_texts \\
+        --dir data/vedic_texts/ \\
+        --format jsonl \\
+        --reset
 """
 
 from __future__ import annotations
@@ -21,6 +27,8 @@ if str(REPO_ROOT) not in sys.path:
 from backend.knowledge.ingest import ingest_directory  # noqa: E402
 from backend.rag.vector_store import COLLECTION_NAMES, ensure_collections  # noqa: E402
 
+FORMATS = ("jsonl", "structured_text", "paragraphs", "pdf")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Ingest a corpus into ChromaDB.")
@@ -34,7 +42,19 @@ def main() -> int:
         "--dir",
         required=True,
         type=Path,
-        help="Directory containing text/markdown files to ingest.",
+        help="Directory containing source files to ingest.",
+    )
+    parser.add_argument(
+        "--format",
+        choices=FORMATS,
+        default=None,
+        help="Force a specific format. Default: auto-detect by extension.",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Drop and recreate the collection before ingesting "
+        "(required when changing EMBEDDING_PROVIDER).",
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Verbose logging."
@@ -46,8 +66,14 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
     )
 
-    ensure_collections()
-    total = ingest_directory(collection_name=args.collection, directory=args.dir)
+    if not args.reset:
+        ensure_collections()
+    total = ingest_directory(
+        collection_name=args.collection,
+        directory=args.dir,
+        format_override=args.format,
+        reset=args.reset,
+    )
     print(f"Ingested {total} chunks into '{args.collection}' from {args.dir}.")
     return 0
 

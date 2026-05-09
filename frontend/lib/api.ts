@@ -12,6 +12,8 @@ export interface Citation {
   chapter?: string | null;
   verse?: string | null;
   language?: string | null;
+  commentary_author?: string | null;
+  tradition?: string | null;
   snippet?: string | null;
   distance?: number | null;
 }
@@ -42,7 +44,14 @@ export interface HealthResponse {
       base_url: string;
       default_model: string;
     };
-    chroma: { reachable: boolean };
+    embeddings?: {
+      provider: string;
+      model: string;
+    };
+    chroma: {
+      reachable: boolean;
+      collections?: Record<string, number>;
+    };
     database: { path: string };
   };
 }

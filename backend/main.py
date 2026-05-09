@@ -1,7 +1,7 @@
 """FastAPI entrypoint for Vedanta AI.
 
-Phase 1 surface:
-    GET  /health             — liveness + dependency probes (Ollama, Chroma)
+API surface (through Phase 2):
+    GET  /health             — liveness + dependency probes (LLM, Chroma)
     POST /api/v1/chat        — classify, dispatch to agent, persist, return
     GET  /api/v1/agents      — list of supported agents
     GET  /api/v1/messages    — recent message history (admin)
@@ -71,9 +71,17 @@ def create_app() -> FastAPI:
         llm_ok = await llm.is_available()
         provider = getattr(llm, "provider", settings.llm_provider)
         base_url = getattr(llm, "base_url", "")
+        chroma_ok = vector_store.is_available()
+        collection_counts: dict[str, int] = {}
+        if chroma_ok:
+            for name in vector_store.COLLECTION_NAMES:
+                try:
+                    collection_counts[name] = vector_store.get_collection(name).count()
+                except Exception:  # noqa: BLE001 - per-collection probe is best-effort
+                    collection_counts[name] = -1
         return {
             "status": "ok",
-            "phase": 1,
+            "phase": 2,
             "dependencies": {
                 "llm": {
                     "provider": provider,
@@ -81,7 +89,14 @@ def create_app() -> FastAPI:
                     "base_url": base_url,
                     "default_model": llm.default_model,
                 },
-                "chroma": {"reachable": vector_store.is_available()},
+                "embeddings": {
+                    "provider": settings.embedding_provider,
+                    "model": settings.embedding_model,
+                },
+                "chroma": {
+                    "reachable": chroma_ok,
+                    "collections": collection_counts,
+                },
                 "database": {"path": str(settings.sqlite_path)},
             },
         }

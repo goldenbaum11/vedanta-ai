@@ -23,8 +23,9 @@ export default async function DashboardPage() {
       <header>
         <h1 className="font-serif text-2xl font-semibold">Admin dashboard</h1>
         <p className="text-sm text-ink-500">
-          Phase 1 view: health probes and the most recent message exchanges.
-          Authentication and per-user controls land in Phase 4.
+          Phase {health?.phase ?? 2} view: health probes, corpus inventory, and
+          the most recent message exchanges. Authentication and per-user
+          controls land in Phase 4.
         </p>
       </header>
 
@@ -35,23 +36,52 @@ export default async function DashboardPage() {
       ) : null}
 
       {health ? (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <HealthTile
-            label={`LLM (${health.dependencies.llm.provider})`}
-            ok={health.dependencies.llm.reachable}
-            detail={`${health.dependencies.llm.default_model} @ ${health.dependencies.llm.base_url}`}
-          />
-          <HealthTile
-            label="ChromaDB"
-            ok={health.dependencies.chroma.reachable}
-            detail="vector store"
-          />
-          <HealthTile
-            label="Database"
-            ok
-            detail={health.dependencies.database.path}
-          />
-        </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <HealthTile
+              label={`LLM (${health.dependencies.llm.provider})`}
+              ok={health.dependencies.llm.reachable}
+              detail={`${health.dependencies.llm.default_model} @ ${health.dependencies.llm.base_url}`}
+            />
+            <HealthTile
+              label={`Embeddings (${health.dependencies.embeddings?.provider ?? "default"})`}
+              ok
+              detail={health.dependencies.embeddings?.model ?? "all-MiniLM-L6-v2"}
+            />
+            <HealthTile
+              label="ChromaDB"
+              ok={health.dependencies.chroma.reachable}
+              detail="vector store"
+            />
+            <HealthTile
+              label="Database"
+              ok
+              detail={health.dependencies.database.path}
+            />
+          </div>
+          {health.dependencies.chroma.collections ? (
+            <div className="rounded-md border border-ink-200 bg-white p-3 text-sm shadow-sm dark:border-ink-800 dark:bg-ink-900">
+              <h2 className="mb-2 font-serif text-base font-semibold">
+                Corpus inventory
+              </h2>
+              <ul className="grid gap-1 sm:grid-cols-2">
+                {Object.entries(health.dependencies.chroma.collections).map(
+                  ([name, count]) => (
+                    <li
+                      key={name}
+                      className="flex items-center justify-between rounded border border-ink-100 bg-ink-50 px-2 py-1 dark:border-ink-800 dark:bg-ink-950"
+                    >
+                      <span className="font-mono text-xs">{name}</span>
+                      <span className="text-xs text-ink-500">
+                        {count >= 0 ? `${count} chunks` : "unavailable"}
+                      </span>
+                    </li>
+                  ),
+                )}
+              </ul>
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       <div>

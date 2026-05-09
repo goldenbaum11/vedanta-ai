@@ -3,8 +3,10 @@
 Local-first multi-agent AI for an ashram community. Five domains: Vedic
 text translation, student communication, infosec, survival skills, media.
 
-> **Phase 1 — Foundation.** FastAPI + intent router + 6 agent stubs +
-> Next.js chat UI + SQLite + ChromaDB. See
+> **Phase 2 — Vedic Text Intelligence.** Multilingual embeddings via a
+> local `/v1/embeddings` server (LM Studio's `nomic-embed-text-v1.5`),
+> verse-aware Sanskrit chunking, and hybrid (metadata-pinned + semantic)
+> RAG retrieval wired into `vedic_scholar` and `sanskrit_grammar`. See
 > [`vedanta_ai_cursor_prompt.md`](./vedanta_ai_cursor_prompt.md) for the
 > full multi-phase spec.
 
@@ -77,23 +79,53 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/chat \
 `/health` should show `llm.reachable: true`. The chat call should route
 to `vedic_scholar` and return a real translation.
 
-## API (Phase 1)
+## API
 
 | Method | Path                | Purpose                                       |
 |--------|---------------------|-----------------------------------------------|
-| GET    | `/health`           | Provider / Chroma / DB probes                 |
+| GET    | `/health`           | Provider / embeddings / Chroma / DB probes + collection counts |
 | GET    | `/api/v1/agents`    | List of agent labels                          |
 | POST   | `/api/v1/chat`      | Classify → dispatch → persist (`agent_override` to bypass) |
 | GET    | `/api/v1/messages`  | Recent exchanges                              |
 
-## (Phase 2+) Ingest a corpus
+## RAG corpus
+
+The `vedic_texts` collection is the canonical source for `vedic_scholar`
+and `sanskrit_grammar`. A starter Bhagavad Gita seed dataset (BG 1.1,
+2.47, 2.48, 4.7, 4.8, 9.22, 18.66 + Shankara/Ramanuja commentary
+glosses) ships in `data/vedic_texts/bhagavad_gita_seed.jsonl`.
 
 ```bash
-python3 scripts/ingest_corpus.py --collection vedic_texts --dir data/vedic_texts/
+# Reset + ingest. --reset is required when changing EMBEDDING_PROVIDER
+# (different providers produce different vector dimensions).
+python3 scripts/ingest_corpus.py \
+  --collection vedic_texts \
+  --dir data/vedic_texts/ \
+  --reset
 ```
 
-Plain-text/markdown only in Phase 1. PDF + verse-aware Sanskrit chunking
-arrives in Phase 2.
+Supported formats (auto-detected by file extension):
+
+| Extension | Chunker            | Best for                                        |
+|-----------|--------------------|-------------------------------------------------|
+| `.jsonl`  | verse-aware        | sacred texts, one verse per line (preferred)    |
+| `.md`     | structured-text    | `## Chapter X` / `### Verse Y` markdown         |
+| `.txt`    | paragraph          | prose                                           |
+| `.pdf`    | paragraph (pypdf)  | commentary PDFs (`pip install pypdf`)           |
+
+Embedding provider is configured in `.env`:
+
+```env
+EMBEDDING_PROVIDER=openai_compatible      # or "ollama" or "default"
+EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5
+EMBEDDING_BASE_URL=                        # empty -> reuse LLM URL
+```
+
+Hybrid retrieval is automatic: when a query mentions a verse like
+"BG 2.47", that verse is pinned via metadata filter *before* semantic
+search, ensuring the requested verse is always present in the LLM's
+context. Out-of-corpus verses cause the agent to refuse rather than
+fabricate Sanskrit.
 
 ## Layout
 

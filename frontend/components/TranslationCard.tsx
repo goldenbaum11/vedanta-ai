@@ -22,10 +22,16 @@ export function TranslationCard({ citations }: TranslationCardProps) {
               {c.source ?? "Unknown source"}
               {c.chapter ? ` · ch. ${c.chapter}` : ""}
               {c.verse ? ` · v. ${c.verse}` : ""}
-              {c.language ? ` · ${c.language}` : ""}
+              {c.commentary_author ? ` · ${c.commentary_author}` : ""}
+              {c.tradition ? ` · ${c.tradition}` : ""}
             </div>
             {c.snippet ? (
               <div className="mt-1 text-ink-600 dark:text-ink-300">{c.snippet}</div>
+            ) : null}
+            {typeof c.distance === "number" ? (
+              <div className="mt-1 text-xs text-ink-500 dark:text-ink-400">
+                relevance distance: {c.distance.toFixed(3)}
+              </div>
             ) : null}
           </li>
         ))}
