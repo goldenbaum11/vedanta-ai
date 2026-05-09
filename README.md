@@ -153,6 +153,24 @@ vedanta-ai/
   or fall back to the system `python3`.
 - **CORS errors from the frontend** — confirm `CORS_ORIGINS` in `.env`
   contains `http://localhost:3000` (default).
+- **Ollama inference times out / extreme slowness on macOS 26 (Tahoe) +
+  Apple Silicon, Ollama 0.23.2 (Homebrew):** GPU discovery fails
+  (`failure during GPU discovery: failed to finish discovery before
+  timeout` in `/opt/homebrew/var/log/ollama.log`), and the runner falls
+  back to CPU at degraded performance — even a 3B model can take >90 s
+  to produce one token. This is an upstream Ollama issue specific to
+  that OS/version combo. Workarounds:
+  1. Install the official **[Ollama desktop app](https://ollama.com/download)**
+     from the .dmg instead of the brew bottle — it ships with a different
+     Metal backend that often works when the CLI bottle does not.
+  2. Use **LM Studio** as the fallback the spec already anticipates;
+     point `OLLAMA_BASE_URL` at its OpenAI-compatible endpoint and we
+     can extend `llm_client.py` to talk to it directly.
+  3. While waiting, the rest of the system runs in **graceful
+     degradation mode**: agents return clearly-labelled stub envelopes
+     and `/health` reports `ollama.reachable: false`. You can still
+     develop and test the classifier, dispatcher, RAG ingestion, and
+     UI without Ollama up.
 
 ## License
 
