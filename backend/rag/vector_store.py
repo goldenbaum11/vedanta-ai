@@ -95,8 +95,15 @@ def add_documents(
     documents: Iterable[str],
     metadatas: Iterable[dict[str, Any]] | None = None,
     ids: Iterable[str] | None = None,
+    skip_existing: bool = True,
 ) -> int:
-    """Insert documents into the named collection. Returns count added."""
+    """Insert documents into the named collection. Returns count actually added.
+
+    If `skip_existing` is True (default) we filter out IDs that already
+    exist in the collection before calling ChromaDB. This makes corpus
+    ingestion idempotent / resumable: a partially-completed run can be
+    re-invoked without re-embedding the already-ingested chunks.
+    """
     collection = get_collection(collection_name)
     docs = list(documents)
     metas = list(metadatas) if metadatas is not None else None
@@ -107,6 +114,23 @@ def add_documents(
     )
     if not docs:
         return 0
+
+    if skip_existing:
+        try:
+            existing = collection.get(ids=doc_ids, include=[])
+            already_present = set(existing.get("ids") or [])
+        except Exception as exc:  # noqa: BLE001 - if probe fails, fall through to add
+            logger.debug("skip_existing probe failed: %s", exc)
+            already_present = set()
+        if already_present:
+            kept_idx = [i for i, _id in enumerate(doc_ids) if _id not in already_present]
+            if not kept_idx:
+                return 0
+            doc_ids = [doc_ids[i] for i in kept_idx]
+            docs = [docs[i] for i in kept_idx]
+            if metas is not None:
+                metas = [metas[i] for i in kept_idx]
+
     collection.add(documents=docs, metadatas=metas, ids=doc_ids)
     return len(docs)
 

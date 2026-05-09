@@ -11,6 +11,9 @@ chromadb>=0.5,<1.0
 # Safe to keep on newer Pythons (no-op).
 eval_type_backport>=0.2.0; python_version < "3.10"
 
+# --- Phase 2: PDF ingestion (chunker.chunk_pdf imports lazily) ---
+pypdf>=5.0,<6.0
+
 # --- Phase 4: Security ---
 cryptography>=43.0,<46.0
 python-jose[cryptography]>=3.3,<4.0

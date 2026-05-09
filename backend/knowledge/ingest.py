@@ -86,6 +86,7 @@ def ingest_directory(
     pending_ids: list[str] = []
     pending_docs: list[str] = []
     pending_metas: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()  # in-run dedupe; cheap insurance for noisy sources
 
     def flush() -> int:
         nonlocal pending_ids, pending_docs, pending_metas
@@ -114,13 +115,24 @@ def ingest_directory(
         if not chunks:
             logger.info("No chunks produced from %s", path)
             continue
+        in_file_dupes = 0
         for chunk_id, doc, meta in chunks:
+            if chunk_id in seen_ids:
+                in_file_dupes += 1
+                continue
+            seen_ids.add(chunk_id)
             pending_ids.append(chunk_id)
             pending_docs.append(doc)
             pending_metas.append(meta)
             if len(pending_docs) >= batch_size:
                 total += flush()
-        logger.info("Queued %d chunks from %s", len(chunks), path)
+        if in_file_dupes:
+            logger.info(
+                "Skipped %d in-run duplicate chunk_ids from %s",
+                in_file_dupes,
+                path,
+            )
+        logger.info("Queued %d chunks from %s", len(chunks) - in_file_dupes, path)
 
     total += flush()
     logger.info("Ingested %d total chunks into '%s'.", total, collection_name)
