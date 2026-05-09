@@ -95,10 +95,19 @@ async def hybrid_retrieve(
 
 
 def format_citations(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Project retrieval hits into the citation shape used in `AgentResponse`."""
+    """Project retrieval hits into the citation shape used in `AgentResponse`.
+
+    Each citation carries both a 280-char `snippet` (compact, for list views
+    and logs) and a `full_text` field with the entire chunk document (for
+    verifiable expansion in the UI). Including the full chunk text is what
+    makes the citation auditable — the user can confirm exactly what the
+    LLM saw, including Sanskrit and IAST that may have been truncated in
+    the snippet.
+    """
     citations: list[dict[str, Any]] = []
     for hit in hits:
         meta = hit.get("metadata") or {}
+        document = hit.get("document") or ""
         citations.append(
             {
                 "id": hit.get("id"),
@@ -108,7 +117,8 @@ def format_citations(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "language": meta.get("language") or meta.get("language_tags"),
                 "commentary_author": meta.get("commentary_author"),
                 "tradition": meta.get("tradition"),
-                "snippet": (hit.get("document") or "")[:280],
+                "snippet": document[:280],
+                "full_text": document,
                 "distance": hit.get("distance"),
             }
         )

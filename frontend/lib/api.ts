@@ -15,6 +15,7 @@ export interface Citation {
   commentary_author?: string | null;
   tradition?: string | null;
   snippet?: string | null;
+  full_text?: string | null;
   distance?: number | null;
 }
 
