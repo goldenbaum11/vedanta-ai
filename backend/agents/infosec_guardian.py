@@ -6,10 +6,10 @@ anomaly detection and weekly privacy summaries.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, AsyncIterator
 
 from ..schemas import AgentResponse
-from ._base import respond_with_llm
+from ._base import StreamEvent, respond_with_llm, respond_with_llm_stream
 
 SYSTEM_PROMPT = """\
 You are the InfoSec Guardian for the Vedanta AI system. You protect the ashram's
@@ -29,11 +29,27 @@ Log all decisions with reasoning.
 """
 
 
+_METADATA_EXTRA: dict[str, Any] = {"phase": 1, "live_monitoring": False}
+
+
 async def handle(query: str, context: dict[str, Any]) -> AgentResponse:
     return await respond_with_llm(
         agent="infosec",
         system_prompt=SYSTEM_PROMPT,
         query=query,
         context=context,
-        metadata_extra={"phase": 1, "live_monitoring": False},
+        metadata_extra=_METADATA_EXTRA,
     )
+
+
+async def handle_stream(
+    query: str, context: dict[str, Any]
+) -> AsyncIterator[StreamEvent]:
+    async for event in respond_with_llm_stream(
+        agent="infosec",
+        system_prompt=SYSTEM_PROMPT,
+        query=query,
+        context=context,
+        metadata_extra=_METADATA_EXTRA,
+    ):
+        yield event

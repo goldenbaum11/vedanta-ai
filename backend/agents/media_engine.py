@@ -6,10 +6,10 @@ indexing into the `media_index` collection.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, AsyncIterator
 
 from ..schemas import AgentResponse
-from ._base import respond_with_llm
+from ._base import StreamEvent, respond_with_llm, respond_with_llm_stream
 
 SYSTEM_PROMPT = """\
 You are the media processing agent. You transcribe, extract, and index
@@ -27,11 +27,31 @@ Capabilities:
 """
 
 
+_METADATA_EXTRA: dict[str, Any] = {
+    "phase": 1,
+    "whisper_enabled": False,
+    "ocr_enabled": False,
+}
+
+
 async def handle(query: str, context: dict[str, Any]) -> AgentResponse:
     return await respond_with_llm(
         agent="media",
         system_prompt=SYSTEM_PROMPT,
         query=query,
         context=context,
-        metadata_extra={"phase": 1, "whisper_enabled": False, "ocr_enabled": False},
+        metadata_extra=_METADATA_EXTRA,
     )
+
+
+async def handle_stream(
+    query: str, context: dict[str, Any]
+) -> AsyncIterator[StreamEvent]:
+    async for event in respond_with_llm_stream(
+        agent="media",
+        system_prompt=SYSTEM_PROMPT,
+        query=query,
+        context=context,
+        metadata_extra=_METADATA_EXTRA,
+    ):
+        yield event

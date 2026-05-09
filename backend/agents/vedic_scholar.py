@@ -10,11 +10,11 @@ questions about traditions/philosophy).
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, AsyncIterator
 
 from ..rag import retriever
 from ..schemas import AgentResponse
-from ._base import respond_with_llm
+from ._base import StreamEvent, respond_with_llm, respond_with_llm_stream
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,8 @@ def _augment(query: str, context_block: str) -> str:
     )
 
 
-async def handle(query: str, context: dict[str, Any]) -> AgentResponse:
+async def _retrieve_and_augment(query: str) -> tuple[list[dict[str, Any]], str]:
+    """Run hybrid RAG retrieval and produce the LLM-ready augmented prompt."""
     try:
         _, citations, context_block = await retriever.retrieve_with_context(
             collection_name=COLLECTION, query=query, top_k=TOP_K
@@ -73,18 +74,40 @@ async def handle(query: str, context: dict[str, Any]) -> AgentResponse:
     except Exception as exc:  # noqa: BLE001 - retrieval failure shouldn't kill the response
         logger.warning("RAG retrieval failed for vedic_scholar: %s", exc)
         citations, context_block = [], ""
+    return citations, _augment(query, context_block)
 
-    augmented = _augment(query, context_block)
+
+def _metadata_extra(citations: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "phase": 2,
+        "rag_enabled": True,
+        "corpus": COLLECTION,
+        "hits": len(citations),
+    }
+
+
+async def handle(query: str, context: dict[str, Any]) -> AgentResponse:
+    citations, augmented = await _retrieve_and_augment(query)
     return await respond_with_llm(
         agent="vedic_scholar",
         system_prompt=SYSTEM_PROMPT,
         query=augmented,
         context=context,
         citations=citations,
-        metadata_extra={
-            "phase": 2,
-            "rag_enabled": True,
-            "corpus": COLLECTION,
-            "hits": len(citations),
-        },
+        metadata_extra=_metadata_extra(citations),
     )
+
+
+async def handle_stream(
+    query: str, context: dict[str, Any]
+) -> AsyncIterator[StreamEvent]:
+    citations, augmented = await _retrieve_and_augment(query)
+    async for event in respond_with_llm_stream(
+        agent="vedic_scholar",
+        system_prompt=SYSTEM_PROMPT,
+        query=augmented,
+        context=context,
+        citations=citations,
+        metadata_extra=_metadata_extra(citations),
+    ):
+        yield event

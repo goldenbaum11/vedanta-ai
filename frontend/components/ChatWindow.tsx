@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentSelector } from "@/components/AgentSelector";
 import { TranslationCard } from "@/components/TranslationCard";
@@ -8,8 +8,11 @@ import {
   AGENT_LABELS,
   type AgentName,
   type Citation,
-  sendChat,
+  type MessageRow,
+  fetchMessages,
+  streamChat,
 } from "@/lib/api";
+import { getOrCreateUserId } from "@/lib/user";
 
 interface ChatTurn {
   id: string;
@@ -20,18 +23,81 @@ interface ChatTurn {
   citations?: Citation[];
   escalate?: boolean;
   createdAt: string;
+  /** True while this assistant turn is still receiving streamed tokens. */
+  streaming?: boolean;
 }
 
 function uid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+/**
+ * Convert one stored DB row (which contains both query and response) into
+ * the two ChatTurn entries that render as a question/answer pair.
+ */
+function rowToTurns(row: MessageRow): ChatTurn[] {
+  let citations: Citation[] = [];
+  if (row.citations_json) {
+    try {
+      const parsed = JSON.parse(row.citations_json);
+      if (Array.isArray(parsed)) {
+        citations = parsed as Citation[];
+      }
+    } catch {
+      // ignore malformed citations from older rows
+    }
+  }
+  const userTurn: ChatTurn = {
+    id: `db-${row.id}-q`,
+    role: "user",
+    text: row.query,
+    createdAt: row.created_at,
+  };
+  const assistantTurn: ChatTurn = {
+    id: `db-${row.id}-a`,
+    role: "assistant",
+    text: row.response,
+    agent: row.agent,
+    confidence: row.intent_confidence,
+    citations,
+    createdAt: row.created_at,
+  };
+  return [userTurn, assistantTurn];
+}
+
 export function ChatWindow() {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hydrating, setHydrating] = useState(true);
   const [agentOverride, setAgentOverride] = useState<AgentName | "auto">("auto");
+  const [userId, setUserId] = useState<string>("");
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Resolve a stable per-browser id and hydrate previous conversation.
+  useEffect(() => {
+    const id = getOrCreateUserId();
+    setUserId(id);
+    let cancelled = false;
+    (async () => {
+      try {
+        const { messages: rows } = await fetchMessages(50, id);
+        if (cancelled) return;
+        // DB returns newest-first; we want chronological order in the UI.
+        const reversed = [...rows].reverse();
+        const restored = reversed.flatMap(rowToTurns);
+        setTurns(restored);
+      } catch {
+        // Backend unreachable on first load; leave turns empty so the
+        // user can still type and let the failure surface on submit.
+      } finally {
+        if (!cancelled) setHydrating(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -49,29 +115,80 @@ export function ChatWindow() {
       text: message,
       createdAt: new Date().toISOString(),
     };
-    setTurns((prev) => [...prev, userTurn]);
+    const assistantId = uid();
+    const assistantTurn: ChatTurn = {
+      id: assistantId,
+      role: "assistant",
+      text: "",
+      createdAt: new Date().toISOString(),
+      streaming: true,
+    };
+    setTurns((prev) => [...prev, userTurn, assistantTurn]);
     setInput("");
     setBusy(true);
 
+    const updateAssistant = (mut: (turn: ChatTurn) => ChatTurn) => {
+      setTurns((prev) =>
+        prev.map((t) => (t.id === assistantId ? mut(t) : t)),
+      );
+    };
+
     try {
-      const response = await sendChat({
+      const stream = streamChat({
         message,
+        user_id: userId || null,
         agent_override: agentOverride === "auto" ? null : agentOverride,
       });
-      setTurns((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          role: "assistant",
-          text: response.text,
-          agent: response.agent,
-          confidence: response.intent_confidence,
-          citations: response.citations,
-          escalate: response.escalate,
-          createdAt: response.created_at,
-        },
-      ]);
+      for await (const event of stream) {
+        switch (event.type) {
+          case "intent":
+            updateAssistant((t) => ({
+              ...t,
+              agent: event.agent,
+              confidence: event.confidence,
+            }));
+            break;
+          case "meta":
+            updateAssistant((t) => ({
+              ...t,
+              agent: event.agent,
+              citations: event.citations,
+              escalate: event.escalate,
+            }));
+            break;
+          case "token":
+            updateAssistant((t) => ({ ...t, text: t.text + event.delta }));
+            break;
+          case "done":
+            updateAssistant((t) => ({
+              ...t,
+              text: event.text || t.text,
+              createdAt: event.created_at ?? t.createdAt,
+              streaming: false,
+            }));
+            break;
+          case "error":
+            updateAssistant((t) => ({
+              ...t,
+              text: event.text || t.text,
+              streaming: false,
+            }));
+            setTurns((prev) => [
+              ...prev,
+              {
+                id: uid(),
+                role: "error",
+                text: event.message,
+                createdAt: new Date().toISOString(),
+              },
+            ]);
+            break;
+        }
+      }
+      // Safety: ensure the streaming flag clears even if no terminal event arrived.
+      updateAssistant((t) => (t.streaming ? { ...t, streaming: false } : t));
     } catch (error) {
+      updateAssistant((t) => ({ ...t, streaming: false }));
       setTurns((prev) => [
         ...prev,
         {
@@ -87,20 +204,45 @@ export function ChatWindow() {
     } finally {
       setBusy(false);
     }
-  }, [agentOverride, busy, input]);
+  }, [agentOverride, busy, input, userId]);
+
+  const clearLocalView = useCallback(() => {
+    setTurns([]);
+  }, []);
+
+  const turnCount = useMemo(() => turns.length, [turns]);
 
   return (
     <section className="flex h-[calc(100vh-10rem)] flex-col gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-2xl font-semibold">Ashram Chat</h1>
-        <AgentSelector value={agentOverride} onChange={setAgentOverride} disabled={busy} />
+        <div className="flex items-center gap-2">
+          {turnCount > 0 ? (
+            <button
+              type="button"
+              onClick={clearLocalView}
+              disabled={busy}
+              title="Hides the current view; does not delete server-side history."
+              className="rounded-md border border-ink-200 px-2 py-1 text-xs text-ink-600 transition hover:bg-ink-50 disabled:opacity-50 dark:border-ink-700 dark:text-ink-300 dark:hover:bg-ink-800"
+            >
+              New conversation
+            </button>
+          ) : null}
+          <AgentSelector
+            value={agentOverride}
+            onChange={setAgentOverride}
+            disabled={busy}
+          />
+        </div>
       </div>
 
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto rounded-lg border border-ink-200 bg-white p-4 shadow-sm dark:border-ink-800 dark:bg-ink-900"
       >
-        {turns.length === 0 ? (
+        {hydrating ? (
+          <HydratingState />
+        ) : turns.length === 0 ? (
           <EmptyState />
         ) : (
           <ul className="space-y-4">
@@ -169,6 +311,7 @@ function TurnBubble({ turn }: { turn: ChatTurn }) {
       </div>
     );
   }
+  const showThinking = turn.streaming && !turn.text;
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-2xl border border-ink-200 bg-ink-50 px-4 py-3 text-sm text-ink-900 shadow-sm dark:border-ink-700 dark:bg-ink-800 dark:text-ink-50">
@@ -184,12 +327,46 @@ function TurnBubble({ turn }: { turn: ChatTurn }) {
               escalate
             </span>
           ) : null}
+          {turn.streaming ? (
+            <span className="rounded bg-saffron-50 px-2 py-0.5 font-mono text-[10px] text-saffron-700 dark:bg-saffron-900/30 dark:text-saffron-200">
+              streaming
+            </span>
+          ) : null}
         </div>
-        <p className="whitespace-pre-wrap leading-relaxed">{turn.text}</p>
+        {showThinking ? (
+          <ThinkingDots />
+        ) : (
+          <p className="whitespace-pre-wrap leading-relaxed">
+            {turn.text}
+            {turn.streaming ? (
+              <span className="ml-0.5 inline-block w-2 animate-pulse bg-ink-400 dark:bg-ink-300">
+                &nbsp;
+              </span>
+            ) : null}
+          </p>
+        )}
         {turn.citations && turn.citations.length > 0 ? (
           <TranslationCard citations={turn.citations} />
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function ThinkingDots() {
+  return (
+    <div className="flex items-center gap-1 text-ink-400" aria-label="Retrieving and thinking">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" />
+    </div>
+  );
+}
+
+function HydratingState() {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-ink-500">
+      Loading recent conversation…
     </div>
   );
 }

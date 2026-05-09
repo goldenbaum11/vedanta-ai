@@ -85,6 +85,86 @@ export async function sendChat(payload: ChatRequest): Promise<ChatResponse> {
   });
 }
 
+/**
+ * Discriminated union of events emitted by `POST /api/v1/chat/stream`.
+ * The wire format is newline-delimited JSON; each parsed line matches
+ * one of these shapes.
+ */
+export type StreamEvent =
+  | { type: "intent"; agent: AgentName; confidence: number; rationale: string | null }
+  | {
+      type: "meta";
+      agent: AgentName;
+      citations: Citation[];
+      escalate: boolean;
+      metadata: Record<string, unknown>;
+    }
+  | { type: "token"; delta: string }
+  | {
+      type: "done";
+      text: string;
+      created_at?: string;
+      incomplete?: boolean;
+    }
+  | { type: "error"; message: string; text?: string };
+
+/**
+ * Stream chat tokens from the backend. Yields parsed events as they
+ * arrive, terminating after the first `done` or `error` event.
+ *
+ * Caller should `await for` to consume; pass an `AbortSignal` to allow
+ * the user to cancel mid-flight (e.g. browser unmount).
+ */
+export async function* streamChat(
+  payload: ChatRequest,
+  signal?: AbortSignal,
+): AsyncGenerator<StreamEvent, void, void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(
+      `Stream ${response.status} ${response.statusText}${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIdx = buffer.indexOf("\n");
+      while (newlineIdx >= 0) {
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+        if (line) {
+          try {
+            yield JSON.parse(line) as StreamEvent;
+          } catch {
+            // Drop malformed lines; the next clean event will flush state.
+          }
+        }
+        newlineIdx = buffer.indexOf("\n");
+      }
+    }
+    if (buffer.trim()) {
+      try {
+        yield JSON.parse(buffer.trim()) as StreamEvent;
+      } catch {
+        // ignore malformed trailing fragment
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function fetchHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/health");
 }
@@ -101,13 +181,21 @@ export interface MessageRow {
   query: string;
   response: string;
   metadata_json: string | null;
+  citations_json: string | null;
   created_at: string;
 }
 
 export async function fetchMessages(
   limit = 50,
+  userId?: string | null,
 ): Promise<{ messages: MessageRow[] }> {
-  return request<{ messages: MessageRow[] }>(`/api/v1/messages?limit=${limit}`);
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (userId) {
+    params.set("user_id", userId);
+  }
+  return request<{ messages: MessageRow[] }>(
+    `/api/v1/messages?${params.toString()}`,
+  );
 }
 
 export const AGENT_LABELS: Record<AgentName, string> = {

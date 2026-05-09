@@ -13,8 +13,9 @@ the system MUST go through this module per `.cursorrules`.
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Protocol
+from typing import Any, AsyncIterator, Protocol
 
 import httpx
 
@@ -42,6 +43,16 @@ class LLMClient(Protocol):
         temperature: float = 0.2,
         extra_options: dict[str, Any] | None = None,
     ) -> str: ...
+
+    def complete_stream(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]: ...
 
     async def is_available(self) -> bool: ...
 
@@ -106,6 +117,53 @@ class OllamaClient:
         if not isinstance(content, str) or not content.strip():
             raise LLMUnavailableError("Ollama returned an empty response.")
         return content.strip()
+
+    async def complete_stream(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]:
+        """Yield content deltas as the model produces them.
+
+        Ollama streams newline-delimited JSON objects of the shape
+        ``{"message": {"content": "..."}, "done": false}``; the final
+        chunk has ``"done": true``.
+        """
+        payload: dict[str, Any] = {
+            "model": model or self._default_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "stream": True,
+            "options": {"temperature": temperature, **(extra_options or {})},
+        }
+        url = f"{self._base_url}/api/chat"
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                async with client.stream("POST", url, json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        delta = (chunk.get("message") or {}).get("content")
+                        if isinstance(delta, str) and delta:
+                            yield delta
+                        if chunk.get("done"):
+                            return
+        except httpx.HTTPError as exc:
+            logger.warning("Ollama streaming request failed: %s", exc)
+            raise LLMUnavailableError(
+                f"Ollama at {self._base_url} is unreachable: {exc}"
+            ) from exc
 
     async def is_available(self) -> bool:
         try:
@@ -231,6 +289,63 @@ class OpenAICompatibleClient:
         if not isinstance(content, str) or not content.strip():
             raise LLMUnavailableError("OpenAI-compatible server returned empty content.")
         return content.strip()
+
+    async def complete_stream(
+        self,
+        system_prompt: str,
+        user_message: str,
+        *,
+        model: str | None = None,
+        temperature: float = 0.2,
+        extra_options: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]:
+        """Yield content deltas via OpenAI-compatible SSE streaming.
+
+        Wire format: ``data: {json}\\n\\n`` per chunk, terminated by
+        ``data: [DONE]\\n\\n``. Each JSON chunk's
+        ``choices[0].delta.content`` carries the next token(s).
+        """
+        chosen_model = await self._resolve_model(model)
+        payload: dict[str, Any] = {
+            "model": chosen_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "stream": True,
+            "temperature": temperature,
+            **(extra_options or {}),
+        }
+        url = f"{self._base_url}/chat/completions"
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                async with client.stream(
+                    "POST", url, json=payload, headers=self._headers()
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data_str = line[len("data:") :].strip()
+                        if data_str == "[DONE]":
+                            return
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = (choices[0].get("delta") or {}).get("content")
+                        if isinstance(delta, str) and delta:
+                            yield delta
+                        if choices[0].get("finish_reason"):
+                            return
+        except httpx.HTTPError as exc:
+            logger.warning("OpenAI-compatible streaming request failed: %s", exc)
+            raise LLMUnavailableError(
+                f"OpenAI-compatible server at {self._base_url} is unreachable: {exc}"
+            ) from exc
 
     async def is_available(self) -> bool:
         try:

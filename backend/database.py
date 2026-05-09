@@ -36,6 +36,7 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         query           TEXT NOT NULL,
         response        TEXT NOT NULL,
         metadata_json   TEXT,
+        citations_json  TEXT,
         created_at      TEXT NOT NULL
     )
     """,
@@ -77,11 +78,20 @@ async def get_connection() -> AsyncIterator[aiosqlite.Connection]:
         yield conn
 
 
+async def _migrate_messages_citations(conn: aiosqlite.Connection) -> None:
+    """Idempotent: add `messages.citations_json` if upgrading from a pre-Phase-2 DB."""
+    async with conn.execute("PRAGMA table_info(messages)") as cursor:
+        existing_cols = {row[1] for row in await cursor.fetchall()}
+    if "citations_json" not in existing_cols:
+        await conn.execute("ALTER TABLE messages ADD COLUMN citations_json TEXT")
+
+
 async def init_db() -> None:
-    """Create tables and indexes if they do not yet exist."""
+    """Create tables and indexes if they do not yet exist; run migrations."""
     async with get_connection() as conn:
         for statement in SCHEMA_STATEMENTS:
             await conn.execute(statement)
+        await _migrate_messages_citations(conn)
         await conn.commit()
 
 
@@ -93,6 +103,7 @@ async def save_message(
     query: str,
     response: str,
     metadata: dict[str, Any] | None = None,
+    citations: list[dict[str, Any]] | None = None,
 ) -> int:
     """Persist a message exchange and return the row id."""
     async with get_connection() as conn:
@@ -100,8 +111,8 @@ async def save_message(
             """
             INSERT INTO messages
                 (user_id, agent, intent_confidence, query, response,
-                 metadata_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 metadata_json, citations_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -110,6 +121,7 @@ async def save_message(
                 query,
                 response,
                 json.dumps(metadata) if metadata else None,
+                json.dumps(citations) if citations else None,
                 _utcnow_iso(),
             ),
         )
@@ -140,18 +152,34 @@ async def write_audit_log(
         await conn.commit()
 
 
-async def list_recent_messages(limit: int = 50) -> list[dict[str, Any]]:
-    """Return recent message exchanges, newest first."""
+async def list_recent_messages(
+    limit: int = 50, *, user_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Return recent message exchanges, newest first.
+
+    If `user_id` is provided, scope the query to that user; otherwise
+    return all users' messages (admin view).
+    """
     async with get_connection() as conn:
-        async with conn.execute(
+        if user_id is not None:
+            stmt = """
+                SELECT id, user_id, agent, intent_confidence, query, response,
+                       metadata_json, citations_json, created_at
+                FROM messages
+                WHERE user_id = ?
+                ORDER BY id DESC
+                LIMIT ?
             """
-            SELECT id, user_id, agent, intent_confidence, query, response,
-                   metadata_json, created_at
-            FROM messages
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ) as cursor:
+            params: tuple[Any, ...] = (user_id, limit)
+        else:
+            stmt = """
+                SELECT id, user_id, agent, intent_confidence, query, response,
+                       metadata_json, citations_json, created_at
+                FROM messages
+                ORDER BY id DESC
+                LIMIT ?
+            """
+            params = (limit,)
+        async with conn.execute(stmt, params) as cursor:
             rows = await cursor.fetchall()
     return [dict(row) for row in rows]

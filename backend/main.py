@@ -1,10 +1,11 @@
 """FastAPI entrypoint for Vedanta AI.
 
 API surface (through Phase 2):
-    GET  /health             — liveness + dependency probes (LLM, Chroma)
-    POST /api/v1/chat        — classify, dispatch to agent, persist, return
-    GET  /api/v1/agents      — list of supported agents
-    GET  /api/v1/messages    — recent message history (admin)
+    GET  /health                — liveness + dependency probes (LLM, Chroma)
+    POST /api/v1/chat           — classify, dispatch, persist, return one JSON
+    POST /api/v1/chat/stream    — same, but ndjson-streamed token-by-token
+    GET  /api/v1/agents         — list of supported agents
+    GET  /api/v1/messages       — recent message history (admin/per-user)
 
 This module wires together: config, database, RAG bootstrap, intent
 classifier, dispatcher, and audit logging.
@@ -12,13 +13,15 @@ classifier, dispatcher, and audit logging.
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from . import database
 from .config import get_settings
@@ -105,18 +108,21 @@ def create_app() -> FastAPI:
     async def list_agents() -> dict[str, list[str]]:
         return {"agents": list(AGENT_NAMES)}
 
-    @app.post("/api/v1/chat", response_model=ChatResponse)
-    async def chat(req: ChatRequest, request: Request) -> ChatResponse:
-        client_ip = request.client.host if request.client else None
-
+    async def _resolve_intent(
+        req: ChatRequest,
+    ) -> intent_classifier.IntentResult:
         if req.agent_override is not None:
-            intent = intent_classifier.IntentResult(
+            return intent_classifier.IntentResult(
                 agent=req.agent_override,
                 confidence=1.0,
                 rationale="user_override",
             )
-        else:
-            intent = await intent_classifier.classify(req.message)
+        return await intent_classifier.classify(req.message)
+
+    @app.post("/api/v1/chat", response_model=ChatResponse)
+    async def chat(req: ChatRequest, request: Request) -> ChatResponse:
+        client_ip = request.client.host if request.client else None
+        intent = await _resolve_intent(req)
 
         try:
             agent_response = await dispatcher.dispatch(
@@ -137,6 +143,7 @@ def create_app() -> FastAPI:
                 **agent_response.metadata,
                 "rationale": intent.rationale,
             },
+            citations=agent_response.citations,
         )
         await audit_log.record(
             endpoint="/api/v1/chat",
@@ -157,11 +164,143 @@ def create_app() -> FastAPI:
             created_at=datetime.now(timezone.utc),
         )
 
+    @app.post("/api/v1/chat/stream")
+    async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
+        """Streaming sibling of `/api/v1/chat`.
+
+        Emits newline-delimited JSON events:
+            {"type":"intent",   "agent","confidence","rationale"}
+            {"type":"meta",     "agent","citations","escalate","metadata"}
+            {"type":"token",    "delta":"..."}    (zero or more)
+            {"type":"done",     "text","created_at"}
+            {"type":"error",    "message","text"}
+
+        Content-Type: application/x-ndjson. The client should read the
+        body as a stream and parse each line as it arrives.
+        """
+        client_ip = request.client.host if request.client else None
+        intent = await _resolve_intent(req)
+
+        async def generator() -> AsyncIterator[bytes]:
+            def encode(event: dict[str, Any]) -> bytes:
+                return (json.dumps(event, ensure_ascii=False) + "\n").encode(
+                    "utf-8"
+                )
+
+            yield encode(
+                {
+                    "type": "intent",
+                    "agent": intent.agent,
+                    "confidence": intent.confidence,
+                    "rationale": intent.rationale,
+                }
+            )
+
+            text_parts: list[str] = []
+            captured_citations: list[dict[str, Any]] = []
+            captured_metadata: dict[str, Any] = {}
+            captured_escalate = False
+            captured_error: str | None = None
+            final_text: str | None = None
+            saw_terminal = False  # True once we've forwarded done|error from the agent
+
+            try:
+                async for event in dispatcher.dispatch_stream(
+                    agent=intent.agent,
+                    query=req.message,
+                    context={
+                        "user_id": req.user_id,
+                        "intent": intent.model_dump(),
+                    },
+                ):
+                    etype = event.get("type")
+                    if etype == "meta":
+                        captured_citations = list(event.get("citations") or [])
+                        captured_metadata = dict(event.get("metadata") or {})
+                        captured_escalate = bool(event.get("escalate"))
+                    elif etype == "token":
+                        delta = event.get("delta")
+                        if isinstance(delta, str):
+                            text_parts.append(delta)
+                    elif etype == "done":
+                        final_text = event.get("text") or "".join(text_parts).strip()
+                        # Enrich the agent's terminal event with timestamp.
+                        event = {**event, "created_at": datetime.now(timezone.utc).isoformat()}
+                        saw_terminal = True
+                    elif etype == "error":
+                        captured_error = event.get("message") or "stream error"
+                        final_text = event.get("text") or "".join(text_parts).strip()
+                        saw_terminal = True
+                    yield encode(event)
+            except ValueError as exc:
+                captured_error = str(exc)
+                yield encode({"type": "error", "message": str(exc), "text": ""})
+                saw_terminal = True
+            except Exception as exc:  # noqa: BLE001 - surface, then persist what we have
+                logger.exception("chat_stream dispatch failed")
+                captured_error = str(exc)
+                yield encode({"type": "error", "message": str(exc), "text": ""})
+                saw_terminal = True
+
+            persisted_text = (
+                final_text if final_text is not None else "".join(text_parts).strip()
+            )
+            if not saw_terminal:
+                # Stream cut off without the agent emitting done|error
+                # (e.g. client disconnected, generator cancelled mid-flight).
+                yield encode(
+                    {
+                        "type": "done",
+                        "text": persisted_text,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "incomplete": True,
+                    }
+                )
+
+            try:
+                await database.save_message(
+                    user_id=req.user_id,
+                    agent=intent.agent,
+                    intent_confidence=intent.confidence,
+                    query=req.message,
+                    response=persisted_text,
+                    metadata={
+                        **captured_metadata,
+                        "rationale": intent.rationale,
+                        "streamed": True,
+                        **({"error": captured_error} if captured_error else {}),
+                    },
+                    citations=captured_citations,
+                )
+                await audit_log.record(
+                    endpoint="/api/v1/chat/stream",
+                    method="POST",
+                    user_id=req.user_id,
+                    ip_address=client_ip,
+                    status_code=200 if not captured_error else 500,
+                    detail=(
+                        f"agent={intent.agent} "
+                        f"confidence={intent.confidence:.2f} "
+                        f"escalate={captured_escalate} "
+                        f"error={captured_error or '-'}"
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001 - persistence failure shouldn't blow up the stream
+                logger.exception("chat_stream persistence failed: %s", exc)
+
+        return StreamingResponse(
+            generator(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.get("/api/v1/messages")
-    async def messages(limit: int = 50) -> dict[str, list[dict[str, object]]]:
+    async def messages(
+        limit: int = 50, user_id: str | None = None
+    ) -> dict[str, list[dict[str, object]]]:
         if limit <= 0 or limit > 500:
             raise HTTPException(status_code=400, detail="limit must be in (0, 500]")
-        rows = await database.list_recent_messages(limit=limit)
+        rows = await database.list_recent_messages(limit=limit, user_id=user_id)
         return {"messages": rows}
 
     return app
