@@ -37,9 +37,9 @@ export default async function DashboardPage() {
       {health ? (
         <div className="grid gap-3 sm:grid-cols-3">
           <HealthTile
-            label="Ollama"
-            ok={health.dependencies.ollama.reachable}
-            detail={`${health.dependencies.ollama.default_model} @ ${health.dependencies.ollama.base_url}`}
+            label={`LLM (${health.dependencies.llm.provider})`}
+            ok={health.dependencies.llm.reachable}
+            detail={`${health.dependencies.llm.default_model} @ ${health.dependencies.llm.base_url}`}
           />
           <HealthTile
             label="ChromaDB"

@@ -68,15 +68,18 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, object]:
         llm = get_llm_client()
-        ollama_ok = await llm.is_available()
+        llm_ok = await llm.is_available()
+        provider = getattr(llm, "provider", settings.llm_provider)
+        base_url = getattr(llm, "base_url", "")
         return {
             "status": "ok",
             "phase": 1,
             "dependencies": {
-                "ollama": {
-                    "reachable": ollama_ok,
-                    "base_url": settings.ollama_base_url,
-                    "default_model": settings.ollama_default_model,
+                "llm": {
+                    "provider": provider,
+                    "reachable": llm_ok,
+                    "base_url": base_url,
+                    "default_model": llm.default_model,
                 },
                 "chroma": {"reachable": vector_store.is_available()},
                 "database": {"path": str(settings.sqlite_path)},

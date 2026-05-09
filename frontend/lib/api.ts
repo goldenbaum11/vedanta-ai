@@ -36,7 +36,12 @@ export interface HealthResponse {
   status: string;
   phase: number;
   dependencies: {
-    ollama: { reachable: boolean; base_url: string; default_model: string };
+    llm: {
+      provider: string;
+      reachable: boolean;
+      base_url: string;
+      default_model: string;
+    };
     chroma: { reachable: boolean };
     database: { path: string };
   };

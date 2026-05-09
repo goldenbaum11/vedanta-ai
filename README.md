@@ -32,12 +32,18 @@ User ─▶ Next.js chat UI ─▶ FastAPI /api/v1/chat
 - macOS / Linux
 - **Python 3.9+** (3.11+ recommended; 3.9 supported via `eval_type_backport`)
 - **Node.js 20+**
-- **[Ollama](https://ollama.com)** running locally
+- A local LLM server — either **[Ollama](https://ollama.com)** (default)
+  or any **OpenAI-compatible** server (LM Studio, llama.cpp `--server`,
+  vLLM, Jan, etc.)
 - (Phase 6) FFmpeg + Tesseract installed system-wide
 
 ## Quickstart
 
-### 1. Install Ollama and pull a model
+### 1. Bring up a local LLM
+
+Pick one provider. The choice is controlled by `LLM_PROVIDER` in `.env`.
+
+#### Option A — Ollama (default)
 
 ```bash
 brew install ollama
@@ -46,6 +52,36 @@ ollama pull llama3                 # ~4.7 GB. Smaller alt: `ollama pull llama3.2
 ```
 
 Sanity check: `curl http://localhost:11434/api/tags` should return JSON.
+
+In `.env`:
+
+```env
+LLM_PROVIDER=ollama
+OLLAMA_DEFAULT_MODEL=llama3
+```
+
+#### Option B — LM Studio (OpenAI-compatible)
+
+Recommended on macOS Tahoe + Apple Silicon, where Ollama 0.23.2 currently
+has GPU regressions (see Troubleshooting).
+
+```bash
+brew install --cask lm-studio
+open -a "LM Studio"
+```
+
+In LM Studio: download a model (e.g. `Llama 3.2 3B Instruct`), then click
+**Developer → Local Server → Start Server** (default port `1234`).
+
+Sanity check: `curl http://localhost:1234/v1/models` should list the loaded model.
+
+In `.env`:
+
+```env
+LLM_PROVIDER=openai_compatible
+OPENAI_COMPATIBLE_BASE_URL=http://localhost:1234/v1
+OPENAI_COMPATIBLE_MODEL=                    # leave empty to auto-pick whatever is loaded
+```
 
 ### 2. Configure environment
 
@@ -94,8 +130,9 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/chat \
   | python3 -m json.tool
 ```
 
-`/health` should show `ollama.reachable: true` and `chroma.reachable: true`.
-The chat call should route to `vedic_scholar` and return a real LLM response.
+`/health` should show `llm.reachable: true` (with the active `provider`)
+and `chroma.reachable: true`. The chat call should route to
+`vedic_scholar` and return a real LLM response.
 
 ## API surface (Phase 1)
 
@@ -146,8 +183,9 @@ vedanta-ai/
 
 - **`zsh: command not found: python3.11`** — use `python3` instead. Any
   3.9+ works; the backport package handles 3.9 union-syntax for pydantic.
-- **`ollama.reachable: false`** in `/health` — start the daemon:
-  `brew services start ollama` or `ollama serve` in another terminal.
+- **`llm.reachable: false`** in `/health` — start the configured
+  provider. For Ollama: `brew services start ollama` (or `ollama serve`).
+  For LM Studio: open the app → Developer → Local Server → Start Server.
 - **`pyexpat` ImportError on Homebrew Python** — your Homebrew Python and
   `expat` got out of sync. Fix with `brew reinstall expat python@3.12`,
   or fall back to the system `python3`.
@@ -163,9 +201,9 @@ vedanta-ai/
   1. Install the official **[Ollama desktop app](https://ollama.com/download)**
      from the .dmg instead of the brew bottle — it ships with a different
      Metal backend that often works when the CLI bottle does not.
-  2. Use **LM Studio** as the fallback the spec already anticipates;
-     point `OLLAMA_BASE_URL` at its OpenAI-compatible endpoint and we
-     can extend `llm_client.py` to talk to it directly.
+  2. **Switch to LM Studio** (already wired). Set `LLM_PROVIDER=openai_compatible`
+     in `.env`, install via `brew install --cask lm-studio`, load a model
+     in the GUI, and start its local server on port 1234.
   3. While waiting, the rest of the system runs in **graceful
      degradation mode**: agents return clearly-labelled stub envelopes
      and `/health` reports `ollama.reachable: false`. You can still

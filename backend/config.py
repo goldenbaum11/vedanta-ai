@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,9 +26,18 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    llm_provider: Literal["ollama", "openai_compatible"] = "ollama"
+
     ollama_base_url: str = "http://localhost:11434"
     ollama_default_model: str = "llama3"
     ollama_timeout_seconds: float = 120.0
+
+    # OpenAI-compatible local server (LM Studio, llama.cpp `--server`,
+    # vLLM, Jan, etc.). Default port matches LM Studio's local server.
+    openai_compatible_base_url: str = "http://localhost:1234/v1"
+    openai_compatible_model: str = ""  # empty -> use whatever model is loaded
+    openai_compatible_api_key: str = "lm-studio"
+    openai_compatible_timeout_seconds: float = 120.0
 
     database_url: str = f"sqlite:///{PROJECT_ROOT / 'vedanta.db'}"
     chroma_persist_dir: str = str(PROJECT_ROOT / "data" / "chroma")

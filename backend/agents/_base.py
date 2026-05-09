@@ -52,7 +52,8 @@ async def respond_with_llm(
             text=fallback_text
             or (
                 f"[{agent} stub] The local LLM is not reachable yet. "
-                "Start Ollama (`ollama serve`) and ensure the configured model is pulled."
+                "Start Ollama (`ollama serve`) or load a model in LM Studio "
+                "and ensure LLM_PROVIDER in .env matches."
             ),
             citations=citations or [],
             metadata=metadata,
