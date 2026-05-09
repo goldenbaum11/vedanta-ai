@@ -9,7 +9,9 @@ text translation, student communication, infosec, survival skills, media.
 > retrieval, ndjson token streaming, and per-browser conversation
 > history with persistent citations. ~2,100-chunk corpus covering the
 > full Bhagavad Gita (701 verses + 700 Sivananda commentaries), 10
-> Principal Upanishads, and one PDF-extracted commentary. See
+> Principal Upanishads, and one PDF-extracted commentary. JWT auth +
+> per-identity rate limits keep the chat endpoint protected, and a
+> 59-test pytest suite gates the backend. See
 > [`vedanta_ai_cursor_prompt.md`](./vedanta_ai_cursor_prompt.md) for the
 > full multi-phase spec.
 
@@ -90,10 +92,23 @@ to `vedic_scholar` and return a real translation.
 | GET    | `/api/v1/agents`           | List of agent labels                          |
 | POST   | `/api/v1/chat`             | Classify → dispatch → persist (one JSON response) |
 | POST   | `/api/v1/chat/stream`      | Same, but ndjson stream: `intent` → `meta` → `token`* → `done`/`error` |
-| GET    | `/api/v1/messages`         | Recent exchanges (filter by `?user_id=`)      |
+| GET    | `/api/v1/messages`         | Recent exchanges (filter by `?user_id=`; auth users are auto-scoped to their own `user:N`) |
+| POST   | `/api/v1/auth/register`    | Create account, return JWT                     |
+| POST   | `/api/v1/auth/login`       | Exchange credentials for a JWT                 |
+| GET    | `/api/v1/auth/me`          | Current authenticated profile                  |
 
 The frontend uses `/chat/stream` so users see citations within ~1s and
 tokens within ~5s, instead of a 25-second blocking wait.
+
+**Auth is optional.** Anonymous users still get full chat (rate limited
+to `RATE_LIMIT_CHAT_ANONYMOUS`, default 30/minute by IP). Signing in
+swaps the rate-limit key from `ip:...` to `user:N` and raises the
+ceiling to `RATE_LIMIT_CHAT_AUTHENTICATED` (default 120/minute). All
+auth endpoints share a tighter `RATE_LIMIT_AUTH` (default 10/minute).
+Tokens are HS256 JWTs signed with `SECRET_KEY` and live for
+`JWT_EXPIRE_MINUTES` (default 24 h). The frontend stores the token in
+`localStorage` under `vedanta:auth` and attaches it to every request as
+`Authorization: Bearer …`.
 
 ## RAG corpus
 
@@ -155,13 +170,29 @@ fabricate Sanskrit.
   The agent's anti-fabrication guard will refuse to invent translations
   for these until they're added.
 
+## Tests
+
+The backend ships with an offline-friendly pytest suite (chunker,
+classifier, retriever, dispatcher, LLM/embedding clients, database,
+auth, rate-limiting). All HTTP traffic is mocked with `respx` and
+ChromaDB runs in-memory, so the suite is fully hermetic.
+
+```bash
+python3 -m pip install --user pytest pytest-asyncio respx pytest-httpx
+python3 -m pytest -q
+```
+
+Expect ~3–5 seconds for 59 tests on a warm machine.
+
 ## Layout
 
 ```
-backend/    FastAPI server, agents, RAG, security
+backend/    FastAPI server, agents, RAG, security (auth + rate-limit)
 frontend/   Next.js + Tailwind chat UI
 data/       Source corpora + ChromaDB persistence
+docs/adr/   Architecture decision records
 scripts/    One-off operational scripts
+tests/      Offline pytest suite (mocks + in-memory chroma)
 ```
 
 ## Conventions

@@ -1,0 +1,32 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = [
+    # Chroma 0.6 emits deprecation warnings on the bundled sqlite path.
+    # We keep them visible but don't fail the suite on them.
+    "ignore::DeprecationWarning:chromadb",
+    "ignore::DeprecationWarning:pydantic",
+    # urllib3 LibreSSL warning on macOS system Python.
+    "ignore::Warning:urllib3",
+]
+addopts = [
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "slow: tests that hit real local services (skipped by default)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = ["data/_cache", "data/chroma"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "B008",   # FastAPI Depends() in defaults is idiomatic
+    "RUF012",
+]

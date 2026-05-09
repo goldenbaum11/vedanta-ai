@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentSelector } from "@/components/AgentSelector";
+import { AuthBar } from "@/components/AuthBar";
 import { TranslationCard } from "@/components/TranslationCard";
 import {
   AGENT_LABELS,
@@ -12,6 +13,7 @@ import {
   fetchMessages,
   streamChat,
 } from "@/lib/api";
+import { type AuthProfile, getStoredAuth } from "@/lib/auth";
 import { getOrCreateUserId } from "@/lib/user";
 
 interface ChatTurn {
@@ -72,16 +74,24 @@ export function ChatWindow() {
   const [hydrating, setHydrating] = useState(true);
   const [agentOverride, setAgentOverride] = useState<AgentName | "auto">("auto");
   const [userId, setUserId] = useState<string>("");
+  const [authProfile, setAuthProfile] = useState<AuthProfile | null>(
+    () => getStoredAuth()?.profile ?? null,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Resolve a stable per-browser id and hydrate previous conversation.
+  // The "ownership" key for history is `user:N` when signed in, or the
+  // anonymous browser id otherwise. When the user signs in/out we
+  // re-hydrate against the appropriate key.
   useEffect(() => {
-    const id = getOrCreateUserId();
-    setUserId(id);
+    const anonId = getOrCreateUserId();
+    const effectiveId = authProfile ? `user:${authProfile.id}` : anonId;
+    setUserId(effectiveId);
     let cancelled = false;
+    setHydrating(true);
     (async () => {
       try {
-        const { messages: rows } = await fetchMessages(50, id);
+        const { messages: rows } = await fetchMessages(50, effectiveId);
         if (cancelled) return;
         // DB returns newest-first; we want chronological order in the UI.
         const reversed = [...rows].reverse();
@@ -97,7 +107,7 @@ export function ChatWindow() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authProfile]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -216,7 +226,8 @@ export function ChatWindow() {
     <section className="flex h-[calc(100vh-10rem)] flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-serif text-2xl font-semibold">Ashram Chat</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <AuthBar onAuthStateChange={setAuthProfile} />
           {turnCount > 0 ? (
             <button
               type="button"

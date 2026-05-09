@@ -6,9 +6,12 @@ API surface (through Phase 2):
     POST /api/v1/chat/stream    — same, but ndjson-streamed token-by-token
     GET  /api/v1/agents         — list of supported agents
     GET  /api/v1/messages       — recent message history (admin/per-user)
+    POST /api/v1/auth/register  — create account, return JWT
+    POST /api/v1/auth/login     — exchange credentials for a JWT
+    GET  /api/v1/auth/me        — current authenticated profile
 
 This module wires together: config, database, RAG bootstrap, intent
-classifier, dispatcher, and audit logging.
+classifier, dispatcher, audit logging, JWT auth, and rate limiting.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -28,8 +31,18 @@ from .config import get_settings
 from .models.llm_client import get_llm_client
 from .rag import vector_store
 from .router import dispatcher, intent_classifier
-from .schemas import AGENT_NAMES, ChatRequest, ChatResponse
-from .security import audit_log
+from .schemas import (
+    AGENT_NAMES,
+    ChatRequest,
+    ChatResponse,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserProfile,
+)
+from .security import audit_log, auth
+from .security.auth import AuthenticatedUser
+from .security.rate_limit import auth_limit, chat_limit, limiter, wire_rate_limiter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,6 +80,7 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
+    wire_rate_limiter(app)
 
     @app.get("/health")
     async def health() -> dict[str, object]:
@@ -120,8 +134,15 @@ def create_app() -> FastAPI:
         return await intent_classifier.classify(req.message)
 
     @app.post("/api/v1/chat", response_model=ChatResponse)
-    async def chat(req: ChatRequest, request: Request) -> ChatResponse:
+    @limiter.limit(chat_limit)
+    async def chat(
+        req: ChatRequest,
+        request: Request,
+        user: AuthenticatedUser | None = Depends(auth.current_user_optional),
+    ) -> ChatResponse:
         client_ip = request.client.host if request.client else None
+        if user is not None and not req.user_id:
+            req.user_id = user.subject
         intent = await _resolve_intent(req)
 
         try:
@@ -165,7 +186,12 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/api/v1/chat/stream")
-    async def chat_stream(req: ChatRequest, request: Request) -> StreamingResponse:
+    @limiter.limit(chat_limit)
+    async def chat_stream(
+        req: ChatRequest,
+        request: Request,
+        user: AuthenticatedUser | None = Depends(auth.current_user_optional),
+    ) -> StreamingResponse:
         """Streaming sibling of `/api/v1/chat`.
 
         Emits newline-delimited JSON events:
@@ -179,6 +205,8 @@ def create_app() -> FastAPI:
         body as a stream and parse each line as it arrives.
         """
         client_ip = request.client.host if request.client else None
+        if user is not None and not req.user_id:
+            req.user_id = user.subject
         intent = await _resolve_intent(req)
 
         async def generator() -> AsyncIterator[bytes]:
@@ -296,12 +324,89 @@ def create_app() -> FastAPI:
 
     @app.get("/api/v1/messages")
     async def messages(
-        limit: int = 50, user_id: str | None = None
+        limit: int = 50,
+        user_id: str | None = None,
+        user: AuthenticatedUser | None = Depends(auth.current_user_optional),
     ) -> dict[str, list[dict[str, object]]]:
         if limit <= 0 or limit > 500:
             raise HTTPException(status_code=400, detail="limit must be in (0, 500]")
+        # Authenticated users can only see their own history. Anonymous
+        # callers may pass `user_id` (their localStorage id) to scope.
+        if user is not None:
+            user_id = user.subject
         rows = await database.list_recent_messages(limit=limit, user_id=user_id)
         return {"messages": rows}
+
+    @app.post("/api/v1/auth/register", response_model=TokenResponse)
+    @limiter.limit(auth_limit)
+    async def register(req: RegisterRequest, request: Request) -> TokenResponse:
+        client_ip = request.client.host if request.client else None
+        try:
+            user_id = await auth.create_user(email=req.email, password=req.password)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        row = await auth.fetch_user_by_id(user_id)
+        if row is None:
+            raise HTTPException(status_code=500, detail="failed to create user")
+        token = auth.create_access_token(
+            user_id=int(row["id"]), email=row["email"], role=row["role"]
+        )
+        await audit_log.record(
+            endpoint="/api/v1/auth/register",
+            method="POST",
+            user_id=f"user:{row['id']}",
+            ip_address=client_ip,
+            status_code=201,
+            detail=f"email={row['email']}",
+        )
+        return TokenResponse(
+            access_token=token,
+            expires_in=int(get_settings().jwt_expire_minutes) * 60,
+            user={"id": row["id"], "email": row["email"], "role": row["role"]},
+        )
+
+    @app.post("/api/v1/auth/login", response_model=TokenResponse)
+    @limiter.limit(auth_limit)
+    async def login(req: LoginRequest, request: Request) -> TokenResponse:
+        client_ip = request.client.host if request.client else None
+        row = await auth.fetch_user_by_email(req.email)
+        if row is None or not auth.verify_password(req.password, row["password_hash"]):
+            await audit_log.record(
+                endpoint="/api/v1/auth/login",
+                method="POST",
+                user_id=None,
+                ip_address=client_ip,
+                status_code=401,
+                detail=f"failed_login email={req.email.lower()}",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials.",
+            )
+        token = auth.create_access_token(
+            user_id=int(row["id"]), email=row["email"], role=row["role"]
+        )
+        await audit_log.record(
+            endpoint="/api/v1/auth/login",
+            method="POST",
+            user_id=f"user:{row['id']}",
+            ip_address=client_ip,
+            status_code=200,
+            detail=f"email={row['email']}",
+        )
+        return TokenResponse(
+            access_token=token,
+            expires_in=int(get_settings().jwt_expire_minutes) * 60,
+            user={"id": row["id"], "email": row["email"], "role": row["role"]},
+        )
+
+    @app.get("/api/v1/auth/me", response_model=UserProfile)
+    async def me(
+        user: AuthenticatedUser = Depends(auth.current_user),
+    ) -> UserProfile:
+        return UserProfile(id=user.id, email=user.email, role=user.role)
 
     return app
 

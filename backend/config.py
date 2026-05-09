@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     secret_key: str = "dev-only-change-me"
     encryption_key: str = "dev-only-change-me"
 
+    # JWT lifetime in minutes. Tokens beyond this need a re-login.
+    jwt_expire_minutes: int = 60 * 24
+
+    # Rate limits applied per identity (user.id when authenticated, else
+    # client IP). slowapi format: "<n>/<unit>" e.g. "30/minute". Set to
+    # an empty string to disable a given bucket entirely.
+    rate_limit_chat_anonymous: str = "30/minute"
+    rate_limit_chat_authenticated: str = "120/minute"
+    rate_limit_auth: str = "10/minute"
+
     admin_email: str = ""
     local_timezone: str = "Asia/Kolkata"
 

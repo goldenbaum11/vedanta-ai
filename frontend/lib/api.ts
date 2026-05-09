@@ -57,6 +57,8 @@ export interface HealthResponse {
   };
 }
 
+import { authHeaders } from "@/lib/auth";
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -65,6 +67,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...(init?.headers ?? {}),
     },
     cache: "no-store",
@@ -121,7 +124,10 @@ export async function* streamChat(
 ): AsyncGenerator<StreamEvent, void, void> {
   const response = await fetch(`${API_BASE_URL}/api/v1/chat/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
     body: JSON.stringify(payload),
     signal,
   });
@@ -206,3 +212,34 @@ export const AGENT_LABELS: Record<AgentName, string> = {
   survival: "Survival Skills",
   media: "Media Engine",
 };
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+  user: { id: number; email: string; role: string };
+}
+
+export async function registerUser(
+  email: string,
+  password: string,
+): Promise<TokenResponse> {
+  return request<TokenResponse>("/api/v1/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function loginUser(
+  email: string,
+  password: string,
+): Promise<TokenResponse> {
+  return request<TokenResponse>("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function fetchMe(): Promise<{ id: number; email: string; role: string }> {
+  return request<{ id: number; email: string; role: string }>("/api/v1/auth/me");
+}

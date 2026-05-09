@@ -65,3 +65,40 @@ class ChatResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     escalate: bool = False
     created_at: datetime
+
+
+class RegisterRequest(BaseModel):
+    """Sign-up payload. Email is normalised to lower-case in the route."""
+
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=256)
+
+
+class LoginRequest(BaseModel):
+    """Username/password sign-in."""
+
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class TokenResponse(BaseModel):
+    """OAuth2-shaped token reply.
+
+    `access_token` is the JWT itself; clients send it back via the
+    `Authorization: Bearer <token>` header. `expires_in` is in seconds.
+    `user` carries minimal profile info so the UI doesn't need a
+    follow-up call.
+    """
+
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    user: dict[str, Any]
+
+
+class UserProfile(BaseModel):
+    """Public user profile (no password hash)."""
+
+    id: int
+    email: str
+    role: str
