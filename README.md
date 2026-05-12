@@ -3,25 +3,31 @@
 Local-first multi-agent AI for an ashram community. Five domains: Vedic
 text translation, student communication, infosec, survival skills, media.
 
-> **Phase 3 — Communication & Multi-turn Memory.** All Phase 2 features
-> plus: per-thread multi-turn memory (the LLM sees the prior six
-> exchanges every reply), a thread sidebar in the UI with auto-titles,
-> a strengthened communication agent with FAQ-grounded RAG and a
-> conservative escalation detector (distress short-circuits the LLM
-> entirely and returns a fixed compassionate reply with crisis hotlines),
-> and an opt-in deterministic Sanskrit grammar parser via the Sanskrit
-> Heritage Platform (graceful fall-back to LLM-only when disabled or
-> unavailable). 86-test pytest suite gates the backend. See
-> [`vedanta_ai_cursor_prompt.md`](./vedanta_ai_cursor_prompt.md) for the
-> full multi-phase spec.
+> **Checkpoint 6 — Containerization + Postgres.** Everything from
+> Phase 3 plus: a SQLAlchemy Core async data layer that runs on
+> SQLite (dev) or Postgres (Docker prod), a Chroma HTTP-client mode
+> that talks to a Chroma server when one's configured (and falls
+> back to the embedded `PersistentClient` otherwise), backend +
+> frontend Dockerfiles (non-root users, multi-stage, ~170 MB / ~250 MB
+> respectively), and a `docker-compose.yml` that brings up the full
+> stack — Postgres, Chroma, FastAPI, Next.js — with healthchecks and
+> named volumes. 86-test pytest suite still gates the backend. See
+> [`vedanta_ai_cursor_prompt.md`](./vedanta_ai_cursor_prompt.md) for
+> the full multi-phase spec.
 
 ## Architecture
 
 ```
 UI ─▶ FastAPI /api/v1/chat ─▶ Classifier ─▶ Dispatcher ─▶ Agent
                                                     │
-                                       SQLite · ChromaDB · LLM (local)
+                                  Postgres/SQLite · ChromaDB · LLM (local)
 ```
+
+The data layer auto-detects driver from `DATABASE_URL`
+(`sqlite:///…` for dev, `postgresql://…` for Docker prod). Chroma
+runs embedded for local dev and over HTTP when `CHROMA_HOST` is
+set. The LLM always runs on the host or on a dedicated machine —
+never inside the Docker stack.
 
 ## Prerequisites
 
@@ -83,6 +89,58 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/chat \
 
 `/health` should show `llm.reachable: true`. The chat call should route
 to `vedic_scholar` and return a real translation.
+
+## Docker Compose (production-ish)
+
+The whole stack — Postgres, ChromaDB, FastAPI backend, Next.js
+frontend — runs from one compose file. The LLM still lives on the
+host so containers reach it over `host.docker.internal`.
+
+```bash
+cp .env.docker.example .env
+echo "SECRET_KEY=$(openssl rand -hex 32)" >> .env
+echo "ENCRYPTION_KEY=$(openssl rand -hex 32)" >> .env
+
+docker compose up --build           # first run: builds images, pulls
+                                    # postgres + chroma, ~5-15 min on
+                                    # a fresh machine.
+```
+
+When it's up:
+
+- Backend: <http://localhost:8000/health>
+- Frontend: <http://localhost:3000>
+- Postgres: `localhost:55432` (default `POSTGRES_PORT`; bumped from
+  5432 to avoid clashing with a host install)
+- Chroma server: <http://localhost:8001>
+
+Data is persisted on three named volumes — `vedanta-ai_postgres_data`,
+`vedanta-ai_chroma_data`, `vedanta-ai_backend_data` — so
+`docker compose down` keeps your DB and vectors. Use
+`docker compose down -v` to wipe everything.
+
+**Ingest corpora into the stack:**
+
+```bash
+# Runs the ingestion script inside the backend container so it
+# writes through the Chroma server, not your local PersistentClient.
+docker compose exec backend python -m scripts.ingest_corpus \
+    --collection vedic_texts --dir data/vedic_texts/ --format jsonl
+```
+
+**Notes**
+
+- The optional **Sanskrit Heritage Platform** service is included in
+  `docker-compose.yml` as a commented stub — no canonical public
+  image exists, so swap in your self-hosted build and set
+  `SANSKRIT_HERITAGE_BASE_URL=http://shp:8080/cgi-bin/SKT/sktreader.cgi`
+  in `.env` when you have one.
+- `extra_hosts: host-gateway` is already wired so Linux hosts can
+  reach the host network without manual IP fiddling.
+- Frontend reads `NEXT_PUBLIC_API_BASE_URL` at **build time** — set
+  it in `.env` before `docker compose build frontend` if you're
+  proxying through a different host. Defaults to
+  `http://localhost:8000`.
 
 ## API
 

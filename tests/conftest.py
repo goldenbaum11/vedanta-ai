@@ -27,7 +27,17 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 def _reset_singletons() -> None:
+    """Drop module-level singletons between tests so env-var changes apply.
+
+    The SQLAlchemy engine is reset by nulling the module-level handle.
+    Outstanding connections will be cleaned up by SQLAlchemy's pool
+    garbage collection — for SQLite this is fast and harmless;
+    Postgres prod uses ``database.reset_engine()`` which awaits
+    ``dispose()`` properly. Our offline tests never run against
+    Postgres so we don't need to care about pool leaks here.
+    """
     from backend import config as _config
+    from backend import database as _database
     from backend.grammar import sanskrit_heritage as _shp
     from backend.models import embedding_client as _embedding
     from backend.models import llm_client as _llm
@@ -39,9 +49,7 @@ def _reset_singletons() -> None:
     _embedding.reset_embedding_function()
     _shp.reset_default_parser()
     _vs._client = None  # type: ignore[attr-defined]
-    # Limiter holds bucket state in a process-global memory storage.
-    # Drop any per-key counters between tests so previous tests don't
-    # bleed into rate-limit assertions.
+    _database._engine = None  # type: ignore[attr-defined]
     try:
         _rl.limiter.reset()
     except Exception:  # noqa: BLE001 - best-effort, reset isn't critical

@@ -1,0 +1,61 @@
+# Root .dockerignore — applied to every build context that uses the
+# repo root (e.g. the backend image). Keep this aggressive: every
+# excluded byte is a faster build and a smaller image.
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+**/htmlcov/
+**/.coverage
+**/.tox/
+**/.venv/
+**/venv/
+**/env/
+
+# Node — never bake host node_modules into a Python image.
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Local data / state — Docker volumes mount these at runtime.
+data/chroma/
+*.db
+*.sqlite
+*.sqlite-journal
+*.sqlite3
+vedanta.db
+backend/.cache/
+.cache/
+
+# Editor + OS noise
+.git/
+.gitignore
+.gitattributes
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docs that don't belong in the image
+*.md
+docs/
+README.md
+CHANGELOG.md
+
+# Compose/CI configs aren't needed inside the image
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+.github/
+
+# Secrets — never accidentally bake these in.
+.env
+.env.*
+!.env.example
+!.env.docker.example

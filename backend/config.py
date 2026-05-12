@@ -50,7 +50,15 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = 60.0
 
     database_url: str = f"sqlite:///{PROJECT_ROOT / 'vedanta.db'}"
+
+    # ChromaDB connection. When `chroma_host` is set, the backend
+    # talks to a Chroma server over HTTP (Docker prod). Otherwise it
+    # uses an embedded PersistentClient writing to `chroma_persist_dir`
+    # (local dev).
     chroma_persist_dir: str = str(PROJECT_ROOT / "data" / "chroma")
+    chroma_host: str = ""
+    chroma_port: int = 8000
+    chroma_ssl: bool = False
 
     instagram_app_id: str = ""
     instagram_app_secret: str = ""

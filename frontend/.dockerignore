@@ -1,0 +1,17 @@
+# Frontend image build context — applied when the build context is
+# `frontend/` (the compose file uses the repo root, but builds may
+# also run scoped from frontend/ for local debugging).
+
+node_modules/
+.next/
+out/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.git/
+README.md

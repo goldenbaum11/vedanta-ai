@@ -35,18 +35,41 @@ _lock = threading.Lock()
 
 
 def _get_client() -> ClientAPI:
-    """Lazily create a thread-safe persistent ChromaDB client."""
+    """Lazily create a thread-safe ChromaDB client.
+
+    When `CHROMA_HOST` is set we connect to a Chroma server over
+    HTTP (the Docker-compose stack runs one). Otherwise we fall
+    back to an embedded ``PersistentClient`` writing to
+    ``CHROMA_PERSIST_DIR`` — the local-dev path that's been used
+    since Phase 1.
+    """
     global _client
     if _client is not None:
         return _client
     with _lock:
         if _client is None:
-            persist_dir = Path(get_settings().chroma_persist_dir)
-            persist_dir.mkdir(parents=True, exist_ok=True)
-            _client = chromadb.PersistentClient(
-                path=str(persist_dir),
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
+            settings = get_settings()
+            chroma_settings = ChromaSettings(anonymized_telemetry=False)
+            if settings.chroma_host:
+                logger.info(
+                    "Using Chroma HTTP client at %s:%s (ssl=%s)",
+                    settings.chroma_host,
+                    settings.chroma_port,
+                    settings.chroma_ssl,
+                )
+                _client = chromadb.HttpClient(
+                    host=settings.chroma_host,
+                    port=settings.chroma_port,
+                    ssl=settings.chroma_ssl,
+                    settings=chroma_settings,
+                )
+            else:
+                persist_dir = Path(settings.chroma_persist_dir)
+                persist_dir.mkdir(parents=True, exist_ok=True)
+                _client = chromadb.PersistentClient(
+                    path=str(persist_dir),
+                    settings=chroma_settings,
+                )
     return _client
 
 

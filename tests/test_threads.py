@@ -210,11 +210,15 @@ async def test_migration_adds_thread_id_and_escalate(
         )
         await conn.commit()
 
+    # Force the engine onto the seeded DB.
+    await database.reset_engine()
     await database.init_db()
 
+    from sqlalchemy import text
+
     async with database.get_connection() as conn:
-        async with conn.execute("PRAGMA table_info(messages)") as cur:
-            cols = {row[1] for row in await cur.fetchall()}
+        result = await conn.execute(text("PRAGMA table_info(messages)"))
+        cols = {row[1] for row in result.fetchall()}
     assert {"thread_id", "escalate", "citations_json"}.issubset(cols)
 
     rows = await database.list_recent_messages()

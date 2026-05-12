@@ -1,14 +1,19 @@
-"""SQLite database tests.
+"""Database tests against the SQLAlchemy-async layer.
 
-Uses the per-test SQLite path provided by `isolated_env` so each test
-runs against a fresh schema. Verifies:
+Each test runs against a fresh per-test SQLite path provided by the
+``isolated_env`` fixture. The data layer also supports Postgres in
+production, but the offline test suite stays SQLite-only — Postgres
+gets exercised by the Docker Compose stack and the live smoke test.
 
-- `init_db` is idempotent and creates the expected tables.
-- `save_message` round-trips both metadata and the new
-  `citations_json` column.
-- The `_migrate_messages_citations` migration is idempotent and adds
-  the column to a pre-Phase-2 schema.
-- `list_recent_messages` honours `user_id` scoping.
+Coverage:
+
+- ``init_db`` is idempotent and creates every expected table.
+- ``save_message`` round-trips metadata and citations and returns the
+  new id.
+- Filtering by ``user_id`` and ``thread_id`` works.
+- The Phase 2/3 migrations run cleanly against a pre-Phase-2 schema
+  (legacy column set) and preserve historical rows.
+- ``write_audit_log`` persists everything we expect.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from pathlib import Path
 
 import aiosqlite
 import pytest
+from sqlalchemy import text
 
 from backend import database
 
@@ -30,10 +36,10 @@ async def test_init_db_creates_tables_and_is_idempotent() -> None:
     await database.init_db()  # second call must not raise
 
     async with database.get_connection() as conn:
-        async with conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ) as cur:
-            tables = {row[0] for row in await cur.fetchall()}
+        result = await conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table'")
+        )
+        tables = {row[0] for row in result.fetchall()}
     assert {"users", "messages", "audit_logs"}.issubset(tables)
 
 
@@ -85,8 +91,9 @@ async def test_list_recent_messages_scopes_to_user_id() -> None:
 async def test_migration_adds_citations_column_to_legacy_db(
     isolated_env: Path,
 ) -> None:
-    """Simulate a pre-Phase-2 DB (no `citations_json`) and verify
-    `init_db` migrates it without dropping data."""
+    """Simulate a pre-Phase-2 DB (no ``citations_json``) and verify
+    ``init_db`` migrates it without dropping data.
+    """
     db_path = isolated_env / "test.db"
     async with aiosqlite.connect(db_path) as conn:
         await conn.execute(
@@ -111,18 +118,22 @@ async def test_migration_adds_citations_column_to_legacy_db(
         )
         await conn.commit()
 
+    # Force the engine to be created against the seeded DB.
+    await database.reset_engine()
     await database.init_db()
 
     async with database.get_connection() as conn:
-        async with conn.execute("PRAGMA table_info(messages)") as cur:
-            cols = {row[1] for row in await cur.fetchall()}
-    assert "citations_json" in cols
+        result = await conn.execute(text("PRAGMA table_info(messages)"))
+        cols = {row[1] for row in result.fetchall()}
+    assert {"citations_json", "thread_id", "escalate"}.issubset(cols)
 
     rows = await database.list_recent_messages()
     assert len(rows) == 1
     legacy_row = rows[0]
     assert legacy_row["user_id"] == "legacy"
     assert legacy_row["citations_json"] is None
+    assert legacy_row["thread_id"] is None
+    assert legacy_row["escalate"] == 0
 
 
 async def test_audit_log_insert() -> None:
@@ -137,12 +148,15 @@ async def test_audit_log_insert() -> None:
     )
 
     async with database.get_connection() as conn:
-        async with conn.execute(
-            "SELECT user_id, endpoint, method, ip_address, status_code, detail FROM audit_logs"
-        ) as cur:
-            rows = await cur.fetchall()
+        result = await conn.execute(
+            text(
+                "SELECT user_id, endpoint, method, ip_address, status_code, detail "
+                "FROM audit_logs"
+            )
+        )
+        rows = result.fetchall()
     assert len(rows) == 1
-    row = dict(rows[0])
+    row = dict(rows[0]._mapping)
     assert row["user_id"] == "alice"
     assert row["endpoint"] == "/api/v1/chat"
     assert row["status_code"] == 200

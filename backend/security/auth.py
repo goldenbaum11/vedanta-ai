@@ -25,11 +25,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import aiosqlite
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
+from sqlalchemy import text
 
 from .. import database
 from ..config import get_settings
@@ -119,24 +119,31 @@ def decode_access_token(token: str) -> dict[str, Any]:
 # --- DB helpers (stay close to the auth flow so they can use the same connection) ---
 
 
+_FETCH_USER_BY_EMAIL = text(
+    "SELECT id, email, role, password_hash FROM users WHERE email = :email"
+)
+_FETCH_USER_BY_ID = text(
+    "SELECT id, email, role, password_hash FROM users WHERE id = :id"
+)
+_INSERT_USER = text(
+    "INSERT INTO users (email, role, password_hash, created_at) "
+    "VALUES (:email, :role, :password_hash, :created_at) "
+    "RETURNING id"
+)
+
+
 async def fetch_user_by_email(email: str) -> dict[str, Any] | None:
     async with database.get_connection() as conn:
-        async with conn.execute(
-            "SELECT id, email, role, password_hash FROM users WHERE email = ?",
-            (email.lower(),),
-        ) as cursor:
-            row = await cursor.fetchone()
-    return dict(row) if row else None
+        result = await conn.execute(_FETCH_USER_BY_EMAIL, {"email": email.lower()})
+        row = result.fetchone()
+    return dict(row._mapping) if row else None
 
 
 async def fetch_user_by_id(user_id: int) -> dict[str, Any] | None:
     async with database.get_connection() as conn:
-        async with conn.execute(
-            "SELECT id, email, role, password_hash FROM users WHERE id = ?",
-            (user_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-    return dict(row) if row else None
+        result = await conn.execute(_FETCH_USER_BY_ID, {"id": user_id})
+        row = result.fetchone()
+    return dict(row._mapping) if row else None
 
 
 async def create_user(*, email: str, password: str, role: str = "student") -> int:
@@ -154,14 +161,19 @@ async def create_user(*, email: str, password: str, role: str = "student") -> in
     created_at = datetime.now(timezone.utc).isoformat()
     try:
         async with database.get_connection() as conn:
-            cursor = await conn.execute(
-                "INSERT INTO users (email, role, password_hash, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (email_norm, role, password_hash, created_at),
+            result = await conn.execute(
+                _INSERT_USER,
+                {
+                    "email": email_norm,
+                    "role": role,
+                    "password_hash": password_hash,
+                    "created_at": created_at,
+                },
             )
+            new_id = result.scalar_one()
             await conn.commit()
-            return cursor.lastrowid or 0
-    except aiosqlite.IntegrityError as exc:
+            return int(new_id or 0)
+    except database.IntegrityError as exc:
         raise ValueError("email already registered") from exc
 
 
