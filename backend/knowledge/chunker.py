@@ -45,6 +45,41 @@ def _flatten_metadata(meta: dict[str, Any], *, source: str) -> dict[str, Any]:
     return flat
 
 
+def _build_catalog_document(record: dict[str, Any]) -> str:
+    """Render a Vishva Vidya catalog row as a retrievable document.
+
+    Unlike verses, catalog entries describe *that a text exists* in
+    Jonas's library — we want the AI to be able to answer "do you
+    have Tattvabodha?" and recommend the matching URL on
+    vedanta.com.br. The doc concatenates title + author + category
+    + description so embeddings have substance to match on.
+    """
+    title = (record.get("source") or "").strip()
+    author = (record.get("author") or "").strip()
+    category = (record.get("category") or "").strip()
+    verse_count = record.get("verse_count")
+    translation_status = (record.get("translation_status") or "").strip()
+    description = (record.get("description") or "").strip()
+
+    header_bits = [title]
+    if author:
+        header_bits.append(f"by {author}")
+    if category:
+        header_bits.append(f"(category: {category})")
+    if verse_count:
+        header_bits.append(f"{verse_count} verses")
+    if translation_status:
+        header_bits.append(f"[{translation_status}]")
+    header = " ".join(header_bits).strip()
+
+    parts: list[str] = []
+    if header:
+        parts.append(f"[Vishva Vidya Library] {header}")
+    if description:
+        parts.append(description)
+    return "\n".join(parts).strip()
+
+
 def _build_verse_document(record: dict[str, Any]) -> str:
     """Concatenate available language layers into a single retrievable string.
 
@@ -52,6 +87,9 @@ def _build_verse_document(record: dict[str, Any]) -> str:
     queries like "explain BG 2.47" match the right chunk via lexical
     overlap, not just semantic similarity to the body.
     """
+    if record.get("record_type") == "catalog_entry":
+        return _build_catalog_document(record)
+
     parts: list[str] = []
     source = (record.get("source") or "").strip()
     chapter = record.get("chapter")
@@ -110,25 +148,57 @@ def chunk_jsonl_verses(path: Path) -> Iterator[VerseChunk]:
             chapter = record.get("chapter")
             verse = record.get("verse")
             commentary_author = record.get("commentary_author")
+            record_type = record.get("record_type") or "verse"
 
             doc = _build_verse_document(record)
             if not doc:
                 continue
 
-            chunk_id_parts = [source, str(chapter or ""), str(verse or ""), commentary_author or ""]
-            chunk_id = ":".join(p for p in chunk_id_parts if p) or f"{path.stem}:{line_no}"
+            if record_type == "catalog_entry":
+                # Catalog rows live one per text. The slug derived from
+                # the title isn't unique in the source data (e.g. the
+                # site lists Kena Upaniṣad twice in different recensions),
+                # so we hash in the author + verse count to keep
+                # re-ingestion idempotent without collapsing distinct rows.
+                slug_seed = (record.get("source_url") or source).rsplit("/", 1)[-1]
+                author_seed = (record.get("author") or "").lower()
+                author_seed = re.sub(r"[^a-z0-9]+", "-", author_seed).strip("-") or "anon"
+                verses_seed = str(record.get("verse_count") or 0)
+                chunk_id = f"vishva_vidya_catalog:{slug_seed}:{author_seed}:{verses_seed}"
+            else:
+                chunk_id_parts = [
+                    source,
+                    str(chapter or ""),
+                    str(verse or ""),
+                    commentary_author or "",
+                ]
+                chunk_id = ":".join(p for p in chunk_id_parts if p) or f"{path.stem}:{line_no}"
 
-            metadata = _flatten_metadata(
-                {
-                    "chapter": str(chapter) if chapter is not None else None,
-                    "verse": str(verse) if verse is not None else None,
-                    "commentary_author": commentary_author,
-                    "tradition": record.get("tradition"),
-                    "language_tags": record.get("language_tags"),
-                    "format": "jsonl_verse",
-                },
-                source=source,
-            )
+            metadata_base: dict[str, Any] = {
+                "chapter": str(chapter) if chapter is not None else None,
+                "verse": str(verse) if verse is not None else None,
+                "commentary_author": commentary_author,
+                "tradition": record.get("tradition"),
+                "language_tags": record.get("language_tags"),
+                "format": "jsonl_verse" if record_type == "verse" else "jsonl_catalog",
+                "record_type": record_type,
+            }
+            if record_type == "catalog_entry":
+                # Extra catalog-only fields, all flat strings/ints so
+                # ChromaDB's metadata filter can reach them.
+                metadata_base.update(
+                    {
+                        "category": record.get("category"),
+                        "author": record.get("author"),
+                        "verse_count": record.get("verse_count"),
+                        "translation_status": record.get("translation_status"),
+                        "language": record.get("language"),
+                        "provenance": record.get("provenance"),
+                        "source_url": record.get("source_url"),
+                    }
+                )
+
+            metadata = _flatten_metadata(metadata_base, source=source)
             yield chunk_id, doc, metadata
 
 

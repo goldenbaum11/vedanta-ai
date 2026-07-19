@@ -246,6 +246,7 @@ and `sanskrit_grammar`. Default ingest produces ~2,100 chunks:
 | `bhagavad_gita_commentary_supplement.jsonl`       | hand-paraphrased Shankara / Ramanuja perspectives                            |      5 | English commentary           |
 | `upanishads.jsonl`                                | [atmabodha/Vedanta_Datasets](https://github.com/atmabodha/Vedanta_Datasets) (ML grant) + [hrgupta/indian-scriptures](https://github.com/hrgupta/indian-scriptures) (MIT) | 582 | Sanskrit + (partial) English for 10 Principal Upanishads |
 | `aurobindo_isha_upanishad_1945.pdf`               | Internet Archive — Aurobindo's Isha commentary (1945, public domain in India)|    121 | English prose (PDF-extracted) |
+| `vishva_vidya_catalog.jsonl`                      | [Vishva Vidya Biblioteca](https://vedanta.com.br/biblioteca) (catalog metadata, used under Level-3 partnership) | 207 | PT description + title + author + verse count + source URL — *catalog only, no verse content yet* |
 
 Reproducible fetch:
 
@@ -253,8 +254,35 @@ Reproducible fetch:
 python3 scripts/fetch_gita.py          # writes data/vedic_texts/bhagavad_gita.jsonl
 python3 scripts/fetch_upanishads.py    # writes data/vedic_texts/upanishads.jsonl
 python3 scripts/fetch_pdfs.py          # downloads commentary PDFs from Internet Archive
+python3 scripts/parse_vishva_vidya_catalog.py \
+    --input uploads/biblioteca-0.md \
+    --output data/vedic_texts/vishva_vidya_catalog.jsonl   # transform the catalog scrape
 python3 scripts/ingest_corpus.py --collection vedic_texts --dir data/vedic_texts/
 ```
+
+### Vishva Vidya catalog vs. verse content
+
+The `vishva_vidya_catalog.jsonl` rows are **catalog entries**
+(`record_type: "catalog_entry"`), not verses. Each chunk is a short
+Portuguese blurb plus title/author/verse-count/category/source URL.
+The AI uses them to answer:
+
+> Q: *"Do you have Tattvabodha?"*
+> A: *"Yes — Vishva Vidya's library has Tattvabodha (45 verses by Śaṅkarācārya, reliable translation): https://vedanta.com.br/biblioteca/tattvabodha"*
+
+The actual Sanskrit + translations of those texts are **not yet
+ingested**. To close that gap under the Level-3 partnership, we need
+one of the following from Vishva Vidya for each text:
+
+* Structured JSON/CSV export with `(text_id, verse_id, sanskrit, iast, pt_translation, en_translation, commentary)` columns, or
+* Read-only API access to the Library backend, or
+* Permission + a stable HTML structure for a one-time scrape.
+
+Until that lands, the AI clearly distinguishes catalog hits from verse
+hits in citations (catalog hits show the `source_url` and the
+"Vishva Vidya Library" header in the chunk text) so users always know
+when they're looking at a recommendation vs. quoted text.
+
 
 JSONL corpora are committed to the repo (small, ours by transformation).
 PDFs are *not* committed (heavy + jurisdictionally ambiguous on US
