@@ -61,7 +61,7 @@ export function DatasetSection() {
         <p className="mb-3 text-sm text-ink-500 dark:text-ink-300">
           {stats?.pending} pair(s) still waiting in{" "}
           <Link
-            href="/admin/review"
+            href="/admin/studio/review"
             className="text-saffron-700 underline dark:text-saffron-300"
           >
             Review

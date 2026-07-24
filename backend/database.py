@@ -189,6 +189,22 @@ persona_models_table = Table(
     Column("created_at", String(64), nullable=False),
 )
 
+# Deployment history for persona models. At most one row is active at
+# a time; the active row substitutes the persona model for the stock
+# agent pipeline in chat. Rows are never deleted so there's an audit
+# trail of who deployed what and when.
+persona_deployments_table = Table(
+    "persona_deployments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("model_id", Integer, nullable=False),
+    Column("deployed_by", String(128)),
+    Column("active", Integer, nullable=False, server_default=text("1")),
+    Column("created_at", String(64), nullable=False),
+    Column("deactivated_at", String(64)),
+    Index("idx_persona_deployments_active", "active"),
+)
+
 
 # --- Engine plumbing -----------------------------------------------------
 

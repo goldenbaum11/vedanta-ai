@@ -3,7 +3,7 @@
 import { PageHeader } from "@/components/admin/PageHeader";
 import { JobsSection } from "@/components/admin/JobsSection";
 
-export default function JobsPage() {
+export default function StudioJobsPage() {
   return (
     <div>
       <PageHeader

@@ -3,7 +3,7 @@
 import { PageHeader } from "@/components/admin/PageHeader";
 import { ReviewSection } from "@/components/admin/ReviewSection";
 
-export default function ReviewPage() {
+export default function StudioReviewPage() {
   return (
     <div>
       <PageHeader

@@ -14,8 +14,14 @@ AgentName = Literal[
     "infosec",
     "survival",
     "media",
+    # Not a classifier label: selected by the chat layer when an admin
+    # has deployed a fine-tuned persona model (see /admin/deployment).
+    "persona",
 ]
 
+# Agents the intent classifier can route to / users can override to.
+# Deliberately excludes "persona", which is activated by deployment
+# state rather than intent.
 AGENT_NAMES: tuple[AgentName, ...] = (
     "vedic_scholar",
     "sanskrit_grammar",

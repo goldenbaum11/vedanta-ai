@@ -3,7 +3,7 @@
 import { PageHeader } from "@/components/admin/PageHeader";
 import { DatasetSection } from "@/components/admin/DatasetSection";
 
-export default function DatasetPage() {
+export default function StudioDatasetPage() {
   return (
     <div>
       <PageHeader

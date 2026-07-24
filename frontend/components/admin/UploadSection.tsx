@@ -94,7 +94,7 @@ export function UploadSection() {
             {message}{" "}
             {lastJobId !== null && (
               <Link
-                href="/admin/jobs"
+                href="/admin/studio/jobs"
                 className="text-saffron-700 underline dark:text-saffron-300"
               >
                 Watch it in Jobs →

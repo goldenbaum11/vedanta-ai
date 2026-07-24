@@ -1,47 +1,58 @@
 "use client";
 
 /**
- * Admin overview — the map of the persona pipeline.
+ * Admin overview — the map of the console.
  *
- * Shows what each stage does, live counts, and where to go next.
- * The actual work happens on the dedicated sub-pages.
+ * One card per section with a plain-language description and a live
+ * status line, plus a computed "suggested next step" so an admin
+ * always knows where to go.
  */
 
 import type { Route } from "next";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
+  ActiveDeployment,
+  AdminUser,
   DatasetStats,
   Job,
   PersonaModel,
   Transcript,
   getDatasetStats,
+  getDeployment,
   listJobs,
   listModels,
   listTranscripts,
+  listUsers,
 } from "@/lib/admin";
 
 export default function AdminOverviewPage() {
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [stats, setStats] = useState<DatasetStats | null>(null);
   const [models, setModels] = useState<PersonaModel[]>([]);
+  const [deployment, setDeployment] = useState<ActiveDeployment | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const [t, j, s, m] = await Promise.all([
+        const [u, t, j, s, m, d] = await Promise.all([
+          listUsers(),
           listTranscripts(),
           listJobs(),
           getDatasetStats(),
           listModels(),
+          getDeployment(),
         ]);
         if (cancelled) return;
+        setUsers(u.users);
         setTranscripts(t.transcripts);
         setJobs(j.jobs);
         setStats(s);
         setModels(m.models);
+        setDeployment(d.active);
       } catch {
         /* transient poll errors are fine */
       }
@@ -57,101 +68,95 @@ export default function AdminOverviewPage() {
   const activeJobs = jobs.filter(
     (j) => j.status === "running" || j.status === "queued",
   ).length;
-  const failedJobs = jobs.filter((j) => j.status === "failed").length;
   const pending = stats?.pending ?? 0;
   const approved = stats?.approved ?? 0;
   const target = stats?.target ?? 500;
   const readyModels = models.filter((m) => m.status === "ready").length;
+  const admins = users.filter((u) => u.role === "admin").length;
 
-  // Figure out the most useful next action so the user never has to guess.
+  // The single most useful next action, so nobody has to guess.
   let nextStep: { href: Route; label: string; why: string };
   if (transcripts.length === 0) {
     nextStep = {
-      href: "/admin/upload",
+      href: "/admin/studio",
       label: "Upload your first transcript",
-      why: "The pipeline starts with a speaker-labelled lesson transcript.",
+      why: "Everything starts with a lesson transcript in the Training Studio.",
     };
   } else if (activeJobs > 0) {
     nextStep = {
-      href: "/admin/jobs",
+      href: "/admin/studio/jobs",
       label: `Watch ${activeJobs} running job${activeJobs > 1 ? "s" : ""}`,
       why: "Extraction or training is in progress — logs stream live.",
     };
   } else if (pending > 0) {
     nextStep = {
-      href: "/admin/review",
+      href: "/admin/studio/review",
       label: `Review ${pending} pending pair${pending > 1 ? "s" : ""}`,
       why: "Only approved pairs make it into the training dataset.",
     };
   } else if (approved > 0 && readyModels === 0) {
     nextStep = {
-      href: "/admin/training",
+      href: "/admin/studio/train",
       label: "Start a training run",
       why: `You have ${approved} approved pairs ready to train on.`,
     };
-  } else if (readyModels > 0) {
+  } else if (readyModels > 0 && !deployment) {
     nextStep = {
-      href: "/admin/training",
+      href: "/admin/testing",
       label: "Test your trained model",
-      why: "Ask AI-Jonas a question and compare it to the real thing.",
+      why: "If it sounds right, put it live from the Deployment page.",
+    };
+  } else if (deployment) {
+    nextStep = {
+      href: "/admin/deployment",
+      label: `${deployment.name} is live in chat`,
+      why: "Check on it, or roll back to the stock pipeline anytime.",
     };
   } else {
     nextStep = {
-      href: "/admin/upload",
+      href: "/admin/studio",
       label: "Upload more transcripts",
       why: "More approved pairs → better persona. Target is ~500.",
     };
   }
 
-  const steps: {
+  const sections: {
     href: Route;
-    num: string;
     title: string;
     what: string;
     stat: string;
     alert?: boolean;
   }[] = [
     {
-      href: "/admin/upload",
-      num: "1",
-      title: "Upload",
-      what: "Drop a speaker-labelled .txt lesson transcript. Extraction (turn splitting + LLM Q&A mining) starts automatically.",
-      stat: `${transcripts.length} transcript${transcripts.length === 1 ? "" : "s"}`,
+      href: "/admin/users",
+      title: "Users",
+      what: "Registered accounts and their roles. Promote trusted people to admin or demote them back to student.",
+      stat: `${users.length} user${users.length === 1 ? "" : "s"} · ${admins} admin${admins === 1 ? "" : "s"}`,
     },
     {
-      href: "/admin/jobs",
-      num: "2",
-      title: "Jobs",
-      what: "Live status and streaming logs for extraction and training runs — everything the pipeline prints, as it happens.",
+      href: "/admin/studio",
+      title: "Training Studio",
+      what: "The five-step pipeline that turns lesson transcripts into a fine-tuned persona model: upload, jobs, review, dataset, train.",
       stat:
         activeJobs > 0
-          ? `${activeJobs} active`
-          : failedJobs > 0
-            ? `${failedJobs} failed`
-            : `${jobs.length} total`,
-      alert: activeJobs > 0 || failedJobs > 0,
+          ? `${activeJobs} job${activeJobs > 1 ? "s" : ""} running`
+          : pending > 0
+            ? `${pending} pair${pending > 1 ? "s" : ""} to review`
+            : `${approved}/${target} pairs approved`,
+      alert: activeJobs > 0 || pending > 0,
     },
     {
-      href: "/admin/review",
-      num: "3",
-      title: "Review",
-      what: "Approve, reject, or edit the Q&A pairs the extractor found. This human pass is what keeps the dataset clean.",
-      stat: pending > 0 ? `${pending} waiting` : "queue empty",
-      alert: pending > 0,
+      href: "/admin/testing",
+      title: "Model Testing",
+      what: "A safe playground: ask trained models questions and judge whether they sound like the teacher. Never touches live chat.",
+      stat: `${readyModels} model${readyModels === 1 ? "" : "s"} ready`,
     },
     {
-      href: "/admin/dataset",
-      num: "4",
-      title: "Dataset",
-      what: "Progress toward the training target and manual export of the train/valid JSONL files.",
-      stat: `${approved} / ${target} approved`,
-    },
-    {
-      href: "/admin/training",
-      num: "5",
-      title: "Training",
-      what: "Fine-tune a LoRA adapter on the approved pairs, track past runs, and chat-test any ready model.",
-      stat: `${readyModels} ready model${readyModels === 1 ? "" : "s"}`,
+      href: "/admin/deployment",
+      title: "Deployment",
+      what: "Controls what answers live chat: the stock agent pipeline, or a trained persona model. Deploy and roll back with one click.",
+      stat: deployment ? `${deployment.name} live` : "stock pipeline",
+      alert: Boolean(deployment),
     },
   ];
 
@@ -172,46 +177,41 @@ export default function AdminOverviewPage() {
         </p>
       </div>
 
-      <div>
-        <h2 className="mb-3 text-lg font-medium text-ink-900 dark:text-ink-50">
-          How the pipeline works
-        </h2>
-        <p className="mb-4 text-sm text-ink-500 dark:text-ink-300">
-          Each lesson transcript flows left to right through five stages. You
-          only do manual work in two places: uploading (1) and reviewing (3) —
-          the rest runs on its own.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {steps.map((step) => (
-            <Link
-              key={step.href}
-              href={step.href}
-              className="group rounded-lg border border-ink-200 bg-white p-4 shadow-sm transition-colors hover:border-saffron-400 dark:border-ink-700 dark:bg-ink-900 dark:hover:border-saffron-500"
-            >
-              <div className="mb-2 flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-saffron-100 text-xs font-semibold text-saffron-800 dark:bg-saffron-900/40 dark:text-saffron-200">
-                  {step.num}
-                </span>
-                <span className="font-medium text-ink-900 group-hover:text-saffron-700 dark:text-ink-50 dark:group-hover:text-saffron-300">
-                  {step.title}
-                </span>
-                <span
-                  className={`ml-auto rounded px-2 py-0.5 text-xs ${
-                    step.alert
-                      ? "bg-saffron-100 font-medium text-saffron-800 dark:bg-saffron-900/40 dark:text-saffron-200"
-                      : "bg-ink-100 text-ink-500 dark:bg-ink-800 dark:text-ink-300"
-                  }`}
-                >
-                  {step.stat}
-                </span>
-              </div>
-              <p className="text-sm leading-relaxed text-ink-500 dark:text-ink-300">
-                {step.what}
-              </p>
-            </Link>
-          ))}
-        </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {sections.map((section) => (
+          <Link
+            key={section.href}
+            href={section.href}
+            className="group rounded-lg border border-ink-200 bg-white p-4 shadow-sm transition-colors hover:border-saffron-400 dark:border-ink-700 dark:bg-ink-900 dark:hover:border-saffron-500"
+          >
+            <div className="mb-2 flex items-center gap-2">
+              <span className="font-medium text-ink-900 group-hover:text-saffron-700 dark:text-ink-50 dark:group-hover:text-saffron-300">
+                {section.title}
+              </span>
+              <span
+                className={`ml-auto rounded px-2 py-0.5 text-xs ${
+                  section.alert
+                    ? "bg-saffron-100 font-medium text-saffron-800 dark:bg-saffron-900/40 dark:text-saffron-200"
+                    : "bg-ink-100 text-ink-500 dark:bg-ink-800 dark:text-ink-300"
+                }`}
+              >
+                {section.stat}
+              </span>
+            </div>
+            <p className="text-sm leading-relaxed text-ink-500 dark:text-ink-300">
+              {section.what}
+            </p>
+          </Link>
+        ))}
       </div>
+
+      <p className="text-sm text-ink-500 dark:text-ink-400">
+        The full journey: <span className="font-medium">Training Studio</span>{" "}
+        builds a model from transcripts →{" "}
+        <span className="font-medium">Model Testing</span> checks it sounds
+        right → <span className="font-medium">Deployment</span> puts it live
+        in chat.
+      </p>
     </div>
   );
 }

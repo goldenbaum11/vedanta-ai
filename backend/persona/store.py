@@ -343,3 +343,88 @@ async def get_model(model_id: int) -> dict[str, Any] | None:
     async with database.get_connection() as conn:
         result = await conn.execute(stmt, {"id": model_id})
         return _row(result)
+
+
+# --- Deployments --------------------------------------------------------------
+# At most one deployment is active at a time. Deploying deactivates the
+# previous row and inserts a new active one, so history is preserved.
+
+
+async def get_active_deployment() -> dict[str, Any] | None:
+    """Return the active deployment joined with its model row, or None."""
+    stmt = text(
+        """
+        SELECT d.id AS deployment_id, d.model_id, d.deployed_by, d.created_at,
+               m.name, m.base_model, m.adapter_path, m.status,
+               m.train_pairs, m.val_pairs
+        FROM persona_deployments d
+        JOIN persona_models m ON m.id = d.model_id
+        WHERE d.active = 1
+        ORDER BY d.id DESC
+        LIMIT 1
+        """
+    )
+    async with database.get_connection() as conn:
+        result = await conn.execute(stmt)
+        return _row(result)
+
+
+async def set_deployment(model_id: int, *, deployed_by: str | None) -> int:
+    """Make `model_id` the live model. Returns the new deployment id."""
+    deactivate = text(
+        """
+        UPDATE persona_deployments
+        SET active = 0, deactivated_at = :now
+        WHERE active = 1
+        """
+    )
+    insert = text(
+        """
+        INSERT INTO persona_deployments (model_id, deployed_by, active, created_at)
+        VALUES (:model_id, :deployed_by, 1, :now)
+        RETURNING id
+        """
+    )
+    now = _now()
+    async with database.get_connection() as conn:
+        await conn.execute(deactivate, {"now": now})
+        result = await conn.execute(
+            insert, {"model_id": model_id, "deployed_by": deployed_by, "now": now}
+        )
+        new_id = result.scalar_one()
+        await conn.commit()
+        return int(new_id)
+
+
+async def clear_deployment() -> bool:
+    """Deactivate the live deployment (back to the stock pipeline).
+
+    Returns True if something was deactivated.
+    """
+    stmt = text(
+        """
+        UPDATE persona_deployments
+        SET active = 0, deactivated_at = :now
+        WHERE active = 1
+        """
+    )
+    async with database.get_connection() as conn:
+        result = await conn.execute(stmt, {"now": _now()})
+        await conn.commit()
+        return bool(result.rowcount)
+
+
+async def list_deployments(limit: int = 20) -> list[dict[str, Any]]:
+    stmt = text(
+        """
+        SELECT d.id AS deployment_id, d.model_id, d.deployed_by, d.active,
+               d.created_at, d.deactivated_at, m.name
+        FROM persona_deployments d
+        JOIN persona_models m ON m.id = d.model_id
+        ORDER BY d.id DESC
+        LIMIT :limit
+        """
+    )
+    async with database.get_connection() as conn:
+        result = await conn.execute(stmt, {"limit": limit})
+        return _rows(result)

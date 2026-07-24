@@ -15,6 +15,7 @@ from ..agents import (
     communication,
     infosec_guardian,
     media_engine,
+    persona,
     sanskrit_grammar,
     survival_skills,
     vedic_scholar,
@@ -36,6 +37,9 @@ AGENT_REGISTRY: dict[AgentName, AgentHandler] = {
     "infosec": infosec_guardian.handle,
     "survival": survival_skills.handle,
     "media": media_engine.handle,
+    # Selected by the chat layer when a persona model is deployed —
+    # never by the intent classifier.
+    "persona": persona.handle,
 }
 
 AGENT_STREAM_REGISTRY: dict[AgentName, AgentStreamHandler] = {
@@ -45,6 +49,7 @@ AGENT_STREAM_REGISTRY: dict[AgentName, AgentStreamHandler] = {
     "infosec": infosec_guardian.handle_stream,
     "survival": survival_skills.handle_stream,
     "media": media_engine.handle_stream,
+    "persona": persona.handle_stream,
 }
 
 

@@ -25,7 +25,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
+from . import database
 from .config import get_settings
 from .persona import extraction, jobs, store
 from .security import audit_log
@@ -256,3 +258,110 @@ async def test_model(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"answer": answer}
+
+
+# --- Users ----------------------------------------------------------------
+
+
+class UserRoleUpdate(BaseModel):
+    role: str = Field(..., pattern="^(student|admin)$")
+
+
+@router.get("/users")
+async def list_users(
+    _admin: AuthenticatedUser = Depends(current_admin),
+) -> dict[str, object]:
+    stmt = text("SELECT id, email, role, created_at FROM users ORDER BY id ASC")
+    async with database.get_connection() as conn:
+        result = await conn.execute(stmt)
+        rows = [dict(r._mapping) for r in result.fetchall()]
+    return {"users": rows}
+
+
+@router.patch("/users/{user_id}")
+async def update_user_role(
+    user_id: int,
+    req: UserRoleUpdate,
+    admin: AuthenticatedUser = Depends(current_admin),
+) -> dict[str, object]:
+    if user_id == admin.id:
+        raise HTTPException(
+            status_code=400,
+            detail="you cannot change your own role (avoids admin lockout)",
+        )
+    async with database.get_connection() as conn:
+        result = await conn.execute(
+            text("UPDATE users SET role = :role WHERE id = :id"),
+            {"role": req.role, "id": user_id},
+        )
+        if not result.rowcount:
+            raise HTTPException(status_code=404, detail="user not found")
+        await conn.commit()
+        fetched = await conn.execute(
+            text("SELECT id, email, role, created_at FROM users WHERE id = :id"),
+            {"id": user_id},
+        )
+        row = dict(fetched.fetchone()._mapping)  # type: ignore[union-attr]
+    await audit_log.record(
+        endpoint=f"/api/v1/admin/users/{user_id}",
+        method="PATCH",
+        user_id=admin.subject,
+        status_code=200,
+        detail=f"user={user_id} role={req.role}",
+    )
+    return row
+
+
+# --- Deployment -------------------------------------------------------------
+# The active deployment substitutes the persona model for the stock
+# agent pipeline in live chat (see backend/main.py _resolve_intent).
+
+
+@router.get("/deployment")
+async def get_deployment(
+    _admin: AuthenticatedUser = Depends(current_admin),
+) -> dict[str, object]:
+    return {
+        "active": await store.get_active_deployment(),
+        "history": await store.list_deployments(),
+    }
+
+
+@router.post("/models/{model_id}/deploy")
+async def deploy_model(
+    model_id: int,
+    admin: AuthenticatedUser = Depends(current_admin),
+) -> dict[str, object]:
+    model = await store.get_model(model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="model not found")
+    if model["status"] != "ready" or not model.get("adapter_path"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"model {model['name']} is not ready (status={model['status']})",
+        )
+    deployment_id = await store.set_deployment(model_id, deployed_by=admin.subject)
+    await audit_log.record(
+        endpoint=f"/api/v1/admin/models/{model_id}/deploy",
+        method="POST",
+        user_id=admin.subject,
+        status_code=200,
+        detail=f"deployment={deployment_id} model={model['name']}",
+    )
+    return {"deployment_id": deployment_id, "model": model["name"]}
+
+
+@router.post("/deployment/deactivate")
+async def deactivate_deployment(
+    admin: AuthenticatedUser = Depends(current_admin),
+) -> dict[str, object]:
+    changed = await store.clear_deployment()
+    if changed:
+        await audit_log.record(
+            endpoint="/api/v1/admin/deployment/deactivate",
+            method="POST",
+            user_id=admin.subject,
+            status_code=200,
+            detail="deployment deactivated — stock pipeline restored",
+        )
+    return {"deactivated": changed}

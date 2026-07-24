@@ -170,3 +170,68 @@ export function testModel(
     body: JSON.stringify({ prompt }),
   });
 }
+
+// --- Users -----------------------------------------------------------------
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  role: "student" | "admin";
+  created_at: string;
+}
+
+export function listUsers(): Promise<{ users: AdminUser[] }> {
+  return request("/api/v1/admin/users");
+}
+
+export function updateUserRole(
+  id: number,
+  role: "student" | "admin",
+): Promise<AdminUser> {
+  return request(`/api/v1/admin/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ role }),
+  });
+}
+
+// --- Deployment --------------------------------------------------------------
+
+export interface ActiveDeployment {
+  deployment_id: number;
+  model_id: number;
+  deployed_by: string | null;
+  created_at: string;
+  name: string;
+  base_model: string;
+  adapter_path: string | null;
+  status: string;
+  train_pairs: number;
+  val_pairs: number;
+}
+
+export interface DeploymentHistoryEntry {
+  deployment_id: number;
+  model_id: number;
+  deployed_by: string | null;
+  active: number;
+  created_at: string;
+  deactivated_at: string | null;
+  name: string;
+}
+
+export function getDeployment(): Promise<{
+  active: ActiveDeployment | null;
+  history: DeploymentHistoryEntry[];
+}> {
+  return request("/api/v1/admin/deployment");
+}
+
+export function deployModel(
+  id: number,
+): Promise<{ deployment_id: number; model: string }> {
+  return request(`/api/v1/admin/models/${id}/deploy`, { method: "POST" });
+}
+
+export function deactivateDeployment(): Promise<{ deactivated: boolean }> {
+  return request("/api/v1/admin/deployment/deactivate", { method: "POST" });
+}

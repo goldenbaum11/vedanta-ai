@@ -1,15 +1,14 @@
 "use client";
 
 /**
- * Admin section layout: auth gate + tab navigation.
+ * Admin console layout: auth gate + section navigation.
  *
- * Each pipeline step is its own page:
- *   /admin           — overview of the whole pipeline
- *   /admin/upload    — add transcripts
- *   /admin/jobs      — watch extraction/training logs
- *   /admin/review    — approve/reject/edit pairs
- *   /admin/dataset   — progress + export
- *   /admin/training  — train + test models
+ * Sections:
+ *   /admin             — overview dashboard
+ *   /admin/users       — accounts + roles
+ *   /admin/studio      — Training Studio (transcript → dataset → LoRA)
+ *   /admin/testing     — try out trained models
+ *   /admin/deployment  — put a trained model live in chat
  */
 
 import Link from "next/link";
@@ -17,13 +16,12 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getAuthProfile, onAuthChange } from "@/lib/auth";
 
-const TABS = [
+const SECTIONS = [
   { href: "/admin", label: "Overview" },
-  { href: "/admin/upload", label: "1 · Upload" },
-  { href: "/admin/jobs", label: "2 · Jobs" },
-  { href: "/admin/review", label: "3 · Review" },
-  { href: "/admin/dataset", label: "4 · Dataset" },
-  { href: "/admin/training", label: "5 · Training" },
+  { href: "/admin/users", label: "Users" },
+  { href: "/admin/studio", label: "Training Studio" },
+  { href: "/admin/testing", label: "Model Testing" },
+  { href: "/admin/deployment", label: "Deployment" },
 ] as const;
 
 export default function AdminLayout({
@@ -45,7 +43,7 @@ export default function AdminLayout({
     <div className="py-2">
       <div className="mb-1 flex items-baseline justify-between">
         <h1 className="font-serif text-2xl font-semibold text-ink-900 dark:text-ink-50">
-          Persona pipeline
+          Admin console
         </h1>
         <Link
           href="/"
@@ -55,7 +53,8 @@ export default function AdminLayout({
         </Link>
       </div>
       <p className="mb-6 text-sm text-ink-500 dark:text-ink-300">
-        Transcripts → extraction → review → dataset → LoRA training
+        Manage users, train and test the AI persona, and control what runs in
+        live chat.
       </p>
 
       {!hydrated ? null : role !== "admin" ? (
@@ -84,22 +83,22 @@ export default function AdminLayout({
       ) : (
         <>
           <nav className="mb-8 flex flex-wrap gap-1 border-b border-ink-200 pb-2 text-sm dark:border-ink-800">
-            {TABS.map((tab) => {
+            {SECTIONS.map((section) => {
               const active =
-                tab.href === "/admin"
+                section.href === "/admin"
                   ? pathname === "/admin"
-                  : pathname.startsWith(tab.href);
+                  : pathname.startsWith(section.href);
               return (
                 <Link
-                  key={tab.href}
-                  href={tab.href}
+                  key={section.href}
+                  href={section.href}
                   className={`rounded-md px-3 py-1.5 transition ${
                     active
                       ? "bg-saffron-600 text-white shadow-sm"
                       : "text-ink-500 hover:bg-ink-100 hover:text-ink-900 dark:text-ink-300 dark:hover:bg-ink-800 dark:hover:text-white"
                   }`}
                 >
-                  {tab.label}
+                  {section.label}
                 </Link>
               );
             })}

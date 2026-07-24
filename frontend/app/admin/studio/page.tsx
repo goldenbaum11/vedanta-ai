@@ -3,7 +3,7 @@
 import { PageHeader } from "@/components/admin/PageHeader";
 import { UploadSection } from "@/components/admin/UploadSection";
 
-export default function UploadPage() {
+export default function StudioUploadPage() {
   return (
     <div>
       <PageHeader

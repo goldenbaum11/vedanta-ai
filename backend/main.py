@@ -31,6 +31,7 @@ from . import database
 from .admin_api import router as admin_router
 from .config import get_settings
 from .models.llm_client import get_llm_client
+from .persona import store as persona_store
 from .rag import vector_store
 from .router import dispatcher, intent_classifier
 from .schemas import (
@@ -134,6 +135,20 @@ def create_app() -> FastAPI:
                 agent=req.agent_override,
                 confidence=1.0,
                 rationale="user_override",
+            )
+        # A deployed persona model substitutes the stock pipeline for
+        # chat (admin console → Deployment). Explicit agent_override
+        # above still wins, so other agents stay reachable.
+        try:
+            deployment = await persona_store.get_active_deployment()
+        except Exception as exc:  # noqa: BLE001 - deployment check must not break chat
+            logger.warning("deployment check failed, using stock routing: %s", exc)
+            deployment = None
+        if deployment is not None:
+            return intent_classifier.IntentResult(
+                agent="persona",
+                confidence=1.0,
+                rationale=f"persona_deployment:{deployment['name']}",
             )
         return await intent_classifier.classify(req.message)
 
