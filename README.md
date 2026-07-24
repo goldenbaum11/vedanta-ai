@@ -64,24 +64,36 @@ ollama pull llama3            # or llama3.2:3b
 **Developer → Local Server** (port 1234). Leave
 `OPENAI_COMPATIBLE_MODEL=` empty to auto-pick whatever's loaded.
 
-### 3. Backend (run from project root)
+### 3. Start the stack (one command)
 
 ```bash
-python3 -m pip install --user -r backend/requirements.txt
-python3 -m uvicorn backend.main:app --reload --port 8000
+./scripts/dev.sh
 ```
 
-Health: <http://localhost:8000/health> · Docs: <http://localhost:8000/docs>
+First run creates `.venv/`, installs backend deps, and installs
+frontend deps; later runs reuse them (re-installing only when
+`backend/requirements.txt` changes). It then starts both servers and
+warns if no local LLM is reachable. `Ctrl+C` stops everything.
 
-### 4. Frontend
+- Backend: <http://localhost:8000/health> · Docs: <http://localhost:8000/docs>
+- Frontend: <http://localhost:3000>
+
+<details>
+<summary>Manual start (what the script does)</summary>
 
 ```bash
+# Backend, from project root
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+.venv/bin/python -m uvicorn backend.main:app --reload --port 8000
+
+# Frontend, second terminal
 cd frontend && npm install && npm run dev
 ```
 
-Open <http://localhost:3000>.
+</details>
 
-### 5. Smoke test
+### 4. Smoke test
 
 ```bash
 curl -s http://127.0.0.1:8000/health | python3 -m json.tool
