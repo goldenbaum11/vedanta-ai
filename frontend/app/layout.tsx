@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { AdminNavLink } from "@/components/AdminNavLink";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -41,6 +42,7 @@ export default function RootLayout({
                 >
                   Dashboard
                 </Link>
+                <AdminNavLink />
               </nav>
             </div>
           </header>
