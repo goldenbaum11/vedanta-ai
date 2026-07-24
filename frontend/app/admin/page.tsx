@@ -157,22 +157,26 @@ export default function AdminOverviewPage() {
 
   return (
     <div className="space-y-8">
-      <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 p-4">
-        <p className="text-xs uppercase tracking-wide text-amber-500">
+      <div className="rounded-lg border border-saffron-200 bg-saffron-50 p-4 dark:border-saffron-700/50 dark:bg-saffron-900/20">
+        <p className="text-xs font-semibold uppercase tracking-wide text-saffron-700 dark:text-saffron-400">
           Suggested next step
         </p>
         <Link
           href={nextStep.href}
-          className="mt-1 block text-lg font-medium text-amber-300 hover:underline"
+          className="mt-1 block text-lg font-medium text-saffron-800 hover:underline dark:text-saffron-200"
         >
           {nextStep.label} →
         </Link>
-        <p className="mt-1 text-sm text-neutral-400">{nextStep.why}</p>
+        <p className="mt-1 text-sm text-ink-600 dark:text-ink-300">
+          {nextStep.why}
+        </p>
       </div>
 
       <div>
-        <h2 className="mb-3 text-lg font-medium">How the pipeline works</h2>
-        <p className="mb-4 text-sm text-neutral-400">
+        <h2 className="mb-3 text-lg font-medium text-ink-900 dark:text-ink-50">
+          How the pipeline works
+        </h2>
+        <p className="mb-4 text-sm text-ink-500 dark:text-ink-300">
           Each lesson transcript flows left to right through five stages. You
           only do manual work in two places: uploading (1) and reviewing (3) —
           the rest runs on its own.
@@ -182,26 +186,26 @@ export default function AdminOverviewPage() {
             <Link
               key={step.href}
               href={step.href}
-              className="group rounded-lg border border-neutral-700 bg-neutral-900 p-4 transition-colors hover:border-amber-600"
+              className="group rounded-lg border border-ink-200 bg-white p-4 shadow-sm transition-colors hover:border-saffron-400 dark:border-ink-700 dark:bg-ink-900 dark:hover:border-saffron-500"
             >
               <div className="mb-2 flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-800 text-xs text-amber-400">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-saffron-100 text-xs font-semibold text-saffron-800 dark:bg-saffron-900/40 dark:text-saffron-200">
                   {step.num}
                 </span>
-                <span className="font-medium group-hover:text-amber-300">
+                <span className="font-medium text-ink-900 group-hover:text-saffron-700 dark:text-ink-50 dark:group-hover:text-saffron-300">
                   {step.title}
                 </span>
                 <span
                   className={`ml-auto rounded px-2 py-0.5 text-xs ${
                     step.alert
-                      ? "bg-amber-900/60 text-amber-300"
-                      : "bg-neutral-800 text-neutral-400"
+                      ? "bg-saffron-100 font-medium text-saffron-800 dark:bg-saffron-900/40 dark:text-saffron-200"
+                      : "bg-ink-100 text-ink-500 dark:bg-ink-800 dark:text-ink-300"
                   }`}
                 >
                   {step.stat}
                 </span>
               </div>
-              <p className="text-sm leading-relaxed text-neutral-400">
+              <p className="text-sm leading-relaxed text-ink-500 dark:text-ink-300">
                 {step.what}
               </p>
             </Link>

@@ -65,10 +65,13 @@ export function TrainingSection() {
 
   const ready = models.filter((m) => m.status === "ready");
 
+  const inputClass =
+    "rounded-md border border-ink-200 bg-white px-2 py-1.5 text-sm dark:border-ink-700 dark:bg-ink-950";
+
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-neutral-700 bg-neutral-900 p-4">
-        <h3 className="mb-2 text-sm font-medium text-neutral-300">
+      <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm dark:border-ink-700 dark:bg-ink-900">
+        <h3 className="mb-2 text-sm font-medium text-ink-700 dark:text-ink-200">
           Start a training run
         </h3>
         <div className="flex flex-wrap items-center gap-3">
@@ -77,42 +80,49 @@ export function TrainingSection() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="model name (default: jonas-vYYYYMMDD-HHMM)"
-            className="w-72 rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm"
+            className={`w-72 ${inputClass}`}
           />
           <button
             onClick={() => void handleStart()}
-            className="rounded bg-amber-600 px-4 py-1.5 text-sm text-white hover:bg-amber-500"
+            className="rounded-md bg-saffron-600 px-4 py-1.5 text-sm text-white shadow-sm hover:bg-saffron-700"
           >
             Start training
           </button>
         </div>
         {message && (
-          <p className="mt-3 text-sm text-neutral-300">
+          <p className="mt-3 text-sm text-ink-700 dark:text-ink-200">
             {message}{" "}
             {startedJobId !== null && (
-              <Link href="/admin/jobs" className="text-amber-400 underline">
+              <Link
+                href="/admin/jobs"
+                className="text-saffron-700 underline dark:text-saffron-300"
+              >
                 Watch the logs in Jobs →
               </Link>
             )}
           </p>
         )}
-        <p className="mt-2 text-xs text-neutral-500">
+        <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
           Exports all approved pairs, then fine-tunes a LoRA adapter on the
           base model (first run downloads it, ~4 GB). Only one training job
           runs at a time.
         </p>
       </div>
 
-      <div className="rounded-lg border border-neutral-700 bg-neutral-900 p-4">
-        <h3 className="mb-2 text-sm font-medium text-neutral-300">Models</h3>
+      <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm dark:border-ink-700 dark:bg-ink-900">
+        <h3 className="mb-2 text-sm font-medium text-ink-700 dark:text-ink-200">
+          Models
+        </h3>
         {models.length === 0 && (
-          <p className="text-sm text-neutral-500">No models trained yet.</p>
+          <p className="text-sm text-ink-500 dark:text-ink-400">
+            No models trained yet.
+          </p>
         )}
         <ul className="space-y-1 text-sm">
           {models.map((m) => (
             <li
               key={m.id}
-              className="flex items-center gap-3 rounded bg-neutral-800 px-3 py-2"
+              className="flex items-center gap-3 rounded-md bg-ink-50 px-3 py-2 dark:bg-ink-800"
             >
               <span
                 className={`rounded px-2 py-0.5 text-xs text-white ${
@@ -126,7 +136,7 @@ export function TrainingSection() {
                 {m.status}
               </span>
               <span className="font-medium">{m.name}</span>
-              <span className="text-xs text-neutral-400">
+              <span className="text-xs text-ink-500 dark:text-ink-300">
                 {m.train_pairs} train / {m.val_pairs} valid ·{" "}
                 {m.base_model.split("/").pop()}
               </span>
@@ -135,12 +145,12 @@ export function TrainingSection() {
         </ul>
       </div>
 
-      <div className="rounded-lg border border-neutral-700 bg-neutral-900 p-4">
-        <h3 className="mb-2 text-sm font-medium text-neutral-300">
+      <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm dark:border-ink-700 dark:bg-ink-900">
+        <h3 className="mb-2 text-sm font-medium text-ink-700 dark:text-ink-200">
           Test a model
         </h3>
         {ready.length === 0 ? (
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-ink-500 dark:text-ink-400">
             No ready models yet — train one first.
           </p>
         ) : (
@@ -151,7 +161,7 @@ export function TrainingSection() {
                 onChange={(e) =>
                   setTestModelId(e.target.value ? Number(e.target.value) : null)
                 }
-                className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm"
+                className={inputClass}
               >
                 <option value="">choose model…</option>
                 {ready.map((m) => (
@@ -168,23 +178,23 @@ export function TrainingSection() {
                   if (e.key === "Enter") void handleTest();
                 }}
                 placeholder="Ask AI-Jonas something…"
-                className="min-w-64 flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm"
+                className={`min-w-64 flex-1 ${inputClass}`}
               />
               <button
                 onClick={() => void handleTest()}
                 disabled={testBusy || testModelId === null}
-                className="rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-500 disabled:opacity-50"
+                className="rounded-md bg-saffron-600 px-3 py-1.5 text-sm text-white shadow-sm hover:bg-saffron-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {testBusy ? "Generating…" : "Ask"}
               </button>
             </div>
             {testBusy && (
-              <p className="mt-2 text-xs text-neutral-500">
+              <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
                 First question loads the model into memory — up to ~30s.
               </p>
             )}
             {testAnswer && (
-              <p className="mt-3 whitespace-pre-wrap rounded bg-neutral-800 p-3 text-sm text-neutral-200">
+              <p className="mt-3 whitespace-pre-wrap rounded-md bg-ink-50 p-3 text-sm text-ink-700 dark:bg-ink-800 dark:text-ink-100">
                 {testAnswer}
               </p>
             )}

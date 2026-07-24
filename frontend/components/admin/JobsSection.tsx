@@ -54,20 +54,20 @@ export function JobsSection() {
 
   const badge = (status: Job["status"]) =>
     ({
-      queued: "bg-neutral-600",
+      queued: "bg-ink-400 dark:bg-ink-600",
       running: "bg-blue-600 animate-pulse",
       succeeded: "bg-green-700",
       failed: "bg-red-700",
     })[status];
 
   return (
-    <div className="rounded-lg border border-neutral-700 bg-neutral-900">
+    <div className="rounded-lg border border-ink-200 bg-white shadow-sm dark:border-ink-700 dark:bg-ink-900">
       {jobs.length === 0 && (
-        <p className="p-4 text-sm text-neutral-500">
+        <p className="p-4 text-sm text-ink-500 dark:text-ink-400">
           No jobs yet — upload a transcript to start one.
         </p>
       )}
-      <ul className="divide-y divide-neutral-800">
+      <ul className="divide-y divide-ink-100 dark:divide-ink-800">
         {jobs.map((job) => (
           <li key={job.id} className="p-3">
             <button
@@ -84,17 +84,19 @@ export function JobsSection() {
                 {job.model_name ? ` · ${job.model_name}` : ""}
                 {job.transcript_id ? ` · transcript ${job.transcript_id}` : ""}
               </span>
-              <span className="ml-auto text-xs text-neutral-500">
+              <span className="ml-auto text-xs text-ink-500 dark:text-ink-400">
                 {new Date(job.created_at).toLocaleString()}
               </span>
             </button>
             {job.error && (
-              <p className="mt-1 text-xs text-red-400">{job.error}</p>
+              <p className="mt-1 text-xs text-red-700 dark:text-red-400">
+                {job.error}
+              </p>
             )}
             {openJob === job.id && (
               <pre
                 ref={logRef}
-                className="mt-2 max-h-72 overflow-auto rounded bg-black p-3 text-xs leading-relaxed text-green-300"
+                className="mt-2 max-h-72 overflow-auto rounded bg-ink-950 p-3 text-xs leading-relaxed text-green-400"
               >
                 {log || "(no output yet)"}
               </pre>

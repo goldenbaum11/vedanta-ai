@@ -42,34 +42,39 @@ export default function AdminLayout({
   }, []);
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8 text-neutral-100">
+    <div className="py-2">
       <div className="mb-1 flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold">Persona pipeline</h1>
+        <h1 className="font-serif text-2xl font-semibold text-ink-900 dark:text-ink-50">
+          Persona pipeline
+        </h1>
         <Link
           href="/"
-          className="text-sm text-neutral-400 hover:text-neutral-200"
+          className="text-sm text-ink-500 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"
         >
           ← Back to chat
         </Link>
       </div>
-      <p className="mb-6 text-sm text-neutral-400">
+      <p className="mb-6 text-sm text-ink-500 dark:text-ink-300">
         Transcripts → extraction → review → dataset → LoRA training
       </p>
 
       {!hydrated ? null : role !== "admin" ? (
-        <div className="rounded-lg border border-neutral-700 bg-neutral-900 p-4 text-sm">
+        <div className="rounded-lg border border-ink-200 bg-white p-4 text-sm dark:border-ink-700 dark:bg-ink-900">
           {role === null ? (
-            <p className="text-neutral-300">
+            <p className="text-ink-700 dark:text-ink-200">
               Sign in with an admin account on the{" "}
-              <Link href="/" className="text-amber-400 underline">
+              <Link
+                href="/"
+                className="text-saffron-700 underline dark:text-saffron-300"
+              >
                 main chat page
               </Link>
               , then come back here.
             </p>
           ) : (
-            <p className="text-red-400">
+            <p className="text-red-700 dark:text-red-400">
               Your account does not have the admin role. Promote it with{" "}
-              <code className="text-neutral-300">
+              <code className="text-ink-700 dark:text-ink-200">
                 python3 scripts/make_admin.py --email you@example.com
               </code>{" "}
               and sign in again.
@@ -78,7 +83,7 @@ export default function AdminLayout({
         </div>
       ) : (
         <>
-          <nav className="mb-8 flex flex-wrap gap-1 border-b border-neutral-800 pb-2 text-sm">
+          <nav className="mb-8 flex flex-wrap gap-1 border-b border-ink-200 pb-2 text-sm dark:border-ink-800">
             {TABS.map((tab) => {
               const active =
                 tab.href === "/admin"
@@ -88,10 +93,10 @@ export default function AdminLayout({
                 <Link
                   key={tab.href}
                   href={tab.href}
-                  className={`rounded-t px-3 py-1.5 ${
+                  className={`rounded-md px-3 py-1.5 transition ${
                     active
-                      ? "bg-amber-600 text-white"
-                      : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+                      ? "bg-saffron-600 text-white shadow-sm"
+                      : "text-ink-500 hover:bg-ink-100 hover:text-ink-900 dark:text-ink-300 dark:hover:bg-ink-800 dark:hover:text-white"
                   }`}
                 >
                   {tab.label}
@@ -102,6 +107,6 @@ export default function AdminLayout({
           {children}
         </>
       )}
-    </main>
+    </div>
   );
 }

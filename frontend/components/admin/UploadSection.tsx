@@ -57,15 +57,15 @@ export function UploadSection() {
 
   const statusColor = (status: string) =>
     ({
-      uploaded: "text-neutral-400",
-      extracting: "text-blue-400",
-      review: "text-amber-400",
-      failed: "text-red-400",
-    })[status] ?? "text-neutral-400";
+      uploaded: "text-ink-500 dark:text-ink-300",
+      extracting: "text-blue-700 dark:text-blue-400",
+      review: "text-saffron-700 dark:text-saffron-300",
+      failed: "text-red-700 dark:text-red-400",
+    })[status] ?? "text-ink-500 dark:text-ink-300";
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-neutral-700 bg-neutral-900 p-4">
+      <div className="rounded-lg border border-ink-200 bg-white p-4 shadow-sm dark:border-ink-700 dark:bg-ink-900">
         <div className="flex flex-wrap items-center gap-3">
           <input
             ref={fileRef}
@@ -74,24 +74,28 @@ export function UploadSection() {
             multiple
             disabled={busy}
             onChange={(e) => void handleFiles(e.target.files)}
-            className="text-sm file:mr-3 file:rounded file:border-0 file:bg-amber-600 file:px-3 file:py-1.5 file:text-sm file:text-white hover:file:bg-amber-500"
+            className="text-sm file:mr-3 file:rounded file:border-0 file:bg-saffron-600 file:px-3 file:py-1.5 file:text-sm file:text-white hover:file:bg-saffron-700"
           />
           <input
             type="text"
             value={speaker}
             onChange={(e) => setSpeaker(e.target.value)}
             placeholder="Speaker label (default: Jonas M)"
-            className="rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm"
+            className="rounded-md border border-ink-200 bg-white px-2 py-1.5 text-sm dark:border-ink-700 dark:bg-ink-950"
           />
-          {busy && <span className="text-sm text-neutral-400">Uploading…</span>}
+          {busy && (
+            <span className="text-sm text-ink-500 dark:text-ink-300">
+              Uploading…
+            </span>
+          )}
         </div>
         {message && (
-          <p className="mt-3 text-sm text-neutral-300">
+          <p className="mt-3 text-sm text-ink-700 dark:text-ink-200">
             {message}{" "}
             {lastJobId !== null && (
               <Link
                 href="/admin/jobs"
-                className="text-amber-400 underline"
+                className="text-saffron-700 underline dark:text-saffron-300"
               >
                 Watch it in Jobs →
               </Link>
@@ -101,18 +105,18 @@ export function UploadSection() {
       </div>
 
       <div>
-        <h3 className="mb-2 text-sm font-medium text-neutral-300">
+        <h3 className="mb-2 text-sm font-medium text-ink-700 dark:text-ink-200">
           Uploaded transcripts
         </h3>
-        <div className="overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900">
+        <div className="overflow-hidden rounded-lg border border-ink-200 bg-white shadow-sm dark:border-ink-700 dark:bg-ink-900">
           {transcripts.length === 0 ? (
-            <p className="p-4 text-sm text-neutral-500">
+            <p className="p-4 text-sm text-ink-500 dark:text-ink-400">
               Nothing uploaded yet.
             </p>
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-neutral-800 text-left text-xs text-neutral-500">
+                <tr className="border-b border-ink-200 text-left text-xs text-ink-500 dark:border-ink-800 dark:text-ink-400">
                   <th className="px-3 py-2">File</th>
                   <th className="px-3 py-2">Words</th>
                   <th className="px-3 py-2">Turns</th>
@@ -123,7 +127,10 @@ export function UploadSection() {
               </thead>
               <tbody>
                 {transcripts.map((t) => (
-                  <tr key={t.id} className="border-b border-neutral-800/50">
+                  <tr
+                    key={t.id}
+                    className="border-b border-ink-100 dark:border-ink-800/50"
+                  >
                     <td className="px-3 py-2 font-medium">{t.filename}</td>
                     <td className="px-3 py-2">{t.word_count.toLocaleString()}</td>
                     <td className="px-3 py-2">{t.turn_count}</td>
@@ -131,7 +138,7 @@ export function UploadSection() {
                     <td className={`px-3 py-2 ${statusColor(t.status)}`}>
                       {t.status}
                     </td>
-                    <td className="px-3 py-2 text-xs text-neutral-500">
+                    <td className="px-3 py-2 text-xs text-ink-500 dark:text-ink-400">
                       {new Date(t.created_at).toLocaleString()}
                     </td>
                   </tr>
