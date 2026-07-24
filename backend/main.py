@@ -28,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from . import database
+from .admin_api import router as admin_router
 from .config import get_settings
 from .models.llm_client import get_llm_client
 from .rag import vector_store
@@ -83,6 +84,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     wire_rate_limiter(app)
+    app.include_router(admin_router)
 
     @app.get("/health")
     async def health() -> dict[str, object]:

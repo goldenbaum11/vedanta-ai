@@ -98,6 +98,15 @@ class Settings(BaseSettings):
     admin_email: str = ""
     local_timezone: str = "Asia/Kolkata"
 
+    # Persona pipeline (admin page). Transcripts are parsed for this
+    # speaker label; names listed in `persona_scrub_names` are replaced
+    # with "the student" in extracted pairs (PII). Training runs in the
+    # dedicated venv under training/ — see training/README.md.
+    persona_target_speaker: str = "Jonas M"
+    persona_scrub_names: str = ""  # comma-separated, e.g. "Fabiana,Uma"
+    persona_base_model: str = "mlx-community/Qwen2.5-7B-Instruct-4bit"
+    persona_training_python: str = ""  # empty -> training/.venv/bin/python
+
     app_host: str = "127.0.0.1"
     app_port: int = 8000
 

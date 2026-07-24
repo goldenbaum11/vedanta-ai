@@ -120,6 +120,75 @@ audit_logs_table = Table(
     Index("idx_audit_logs_created_at", "created_at"),
 )
 
+# --- Persona pipeline (admin) ----------------------------------------------
+# Transcripts are uploaded via the admin API; extraction jobs turn them
+# into Q&A pairs; humans review pairs; approved pairs are exported as a
+# LoRA training dataset; training jobs produce entries in persona_models.
+
+persona_transcripts_table = Table(
+    "persona_transcripts",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("filename", String(255), nullable=False),
+    Column("uploaded_by", String(128)),
+    Column("content_path", String(512), nullable=False),
+    Column("target_speaker", String(64), nullable=False),
+    Column("word_count", Integer, nullable=False, server_default=text("0")),
+    Column("turn_count", Integer, nullable=False, server_default=text("0")),
+    Column("pair_count", Integer, nullable=False, server_default=text("0")),
+    Column("status", String(32), nullable=False, server_default=text("'uploaded'")),
+    Column("created_at", String(64), nullable=False),
+)
+
+persona_pairs_table = Table(
+    "persona_pairs",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("transcript_id", Integer, nullable=False),
+    Column("question", Text, nullable=False),
+    Column("answer", Text, nullable=False),
+    Column("kind", String(32), nullable=False),
+    Column("segment", Integer),
+    # pending | approved | rejected
+    Column("status", String(32), nullable=False, server_default=text("'pending'")),
+    Column("created_at", String(64), nullable=False),
+    Column("reviewed_at", String(64)),
+    Index("idx_persona_pairs_transcript", "transcript_id"),
+    Index("idx_persona_pairs_status", "status"),
+)
+
+persona_jobs_table = Table(
+    "persona_jobs",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    # extraction | training
+    Column("kind", String(32), nullable=False),
+    # queued | running | succeeded | failed
+    Column("status", String(32), nullable=False, server_default=text("'queued'")),
+    Column("transcript_id", Integer),
+    Column("model_name", String(128)),
+    Column("log", Text),
+    Column("error", Text),
+    Column("created_at", String(64), nullable=False),
+    Column("updated_at", String(64)),
+    Index("idx_persona_jobs_status", "status"),
+)
+
+persona_models_table = Table(
+    "persona_models",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String(128), nullable=False, unique=True),
+    Column("base_model", String(255), nullable=False),
+    Column("adapter_path", String(512)),
+    # training | ready | failed
+    Column("status", String(32), nullable=False, server_default=text("'training'")),
+    Column("train_pairs", Integer, nullable=False, server_default=text("0")),
+    Column("val_pairs", Integer, nullable=False, server_default=text("0")),
+    Column("notes", Text),
+    Column("created_at", String(64), nullable=False),
+)
+
 
 # --- Engine plumbing -----------------------------------------------------
 

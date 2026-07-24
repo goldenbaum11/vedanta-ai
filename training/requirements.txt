@@ -1,0 +1,4 @@
+# Training environment for the persona LoRA (Apple Silicon / MLX).
+# Installed into training/.venv by training/setup.sh — keep out of the
+# backend requirements; the FastAPI app never imports any of this.
+mlx-lm>=0.20

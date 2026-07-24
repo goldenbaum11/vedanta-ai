@@ -23,6 +23,9 @@ UI ─▶ FastAPI /api/v1/chat ─▶ Classifier ─▶ Dispatcher ─▶ Agent
                                   Postgres/SQLite · ChromaDB · LLM (local)
 ```
 
+Full technology inventory (what, which version, and why — including
+what we deliberately don't use): [`docs/TECH_STACK.md`](./docs/TECH_STACK.md).
+
 The data layer auto-detects driver from `DATABASE_URL`
 (`sqlite:///…` for dev, `postgresql://…` for Docker prod). Chroma
 runs embedded for local dev and over HTTP when `CHROMA_HOST` is
@@ -322,6 +325,26 @@ fabricate Sanskrit.
   Shvetashvatara — Sanskrit text only; English translations pending.
   The agent's anti-fabrication guard will refuse to invent translations
   for these until they're added.
+
+## Persona pipeline (admin)
+
+The `/admin` page (admin role required) drives the "AI Jonas" persona
+workflow: upload speaker-labelled class transcripts → an extraction
+job pulls the teacher's turns and mines Q&A pairs with the local LLM
+(live logs in the UI) → review each pair (approve/reject/edit) →
+export the approved set → one-click LoRA training on Apple Silicon
+(MLX, separate venv under `training/`) → test the trained model from
+the same page.
+
+```bash
+cd training && ./setup.sh                                  # one-time
+python3 scripts/make_admin.py --email you@example.com      # promote
+# then open http://localhost:3000/admin
+```
+
+Everything under `data/persona/` (transcripts, pairs, adapters) is
+gitignored — student questions are PII and never leave the machine.
+See `training/README.md` for shipping a trained model to LM Studio.
 
 ## Tests
 

@@ -221,3 +221,18 @@ async def current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+async def current_admin(
+    user: AuthenticatedUser = Depends(current_user),
+) -> AuthenticatedUser:
+    """Require an authenticated user with the `admin` role.
+
+    Promote a user with: python3 scripts/make_admin.py --email <email>
+    """
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required.",
+        )
+    return user

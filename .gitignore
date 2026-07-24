@@ -61,3 +61,8 @@ backups/
 
 # Media outputs (keep source dirs but ignore generated artifacts)
 data/media/_generated/
+
+# Persona pipeline data (raw class transcripts + extracted turns contain
+# student names and personal questions — PII stays local, never in git)
+data/persona/
+training/.venv/
