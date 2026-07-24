@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { loginUser, registerUser } from "@/lib/api";
@@ -77,6 +78,14 @@ export function AuthBar({ onAuthStateChange }: Props) {
         <span className="rounded-full bg-saffron-100 px-2 py-0.5 font-semibold text-saffron-800 dark:bg-saffron-900/40 dark:text-saffron-200">
           {profile.email}
         </span>
+        {profile.role === "admin" ? (
+          <Link
+            href="/admin"
+            className="rounded-md border border-ink-200 px-2 py-1 transition hover:bg-ink-50 dark:border-ink-700 dark:hover:bg-ink-800"
+          >
+            Admin
+          </Link>
+        ) : null}
         <button
           type="button"
           onClick={signOut}
