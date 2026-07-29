@@ -11,7 +11,7 @@ text translation, student communication, infosec, survival skills, media.
 > frontend Dockerfiles (non-root users, multi-stage, ~170 MB / ~250 MB
 > respectively), and a `docker-compose.yml` that brings up the full
 > stack — Postgres, Chroma, FastAPI, Next.js — with healthchecks and
-> named volumes. 86-test pytest suite still gates the backend. See
+> named volumes. 101-test pytest suite still gates the backend. See
 > [`vedanta_ai_cursor_prompt.md`](./vedanta_ai_cursor_prompt.md) for
 > the full multi-phase spec.
 
@@ -250,6 +250,52 @@ running offline never breaks the chat path. For production we
 recommend a self-hosted Docker SHP image; the public Inria server
 is fine for development.
 
+## Media processing (Whisper + OCR)
+
+The `media` agent (Phase 6) answers questions grounded in the
+`media_index` ChromaDB collection: transcribed audio/video (Whisper)
+and OCR'd images/manuscript scans (Tesseract). Like the other RAG
+agents, retrieval always runs before the LLM call — see
+`backend/agents/media_engine.py`.
+
+Both backends are **optional, lazily-imported dependencies**
+(`backend/media/transcribe.py`, `backend/media/ocr.py`) commented out
+in `backend/requirements.txt` by default. Without them installed, the
+agent still works — it just has nothing indexed to cite, and `GET
+/health` reports `dependencies.media.whisper_available` /
+`ocr_available` as `false` so you can tell at a glance. To enable:
+
+```bash
+pip install openai-whisper pytesseract pillow ffmpeg-python
+# plus the system binaries — neither is a pip package:
+sudo apt install ffmpeg tesseract-ocr    # Ubuntu/Debian
+```
+
+(For the Docker stack, add both `apt-get install` targets to
+`backend/Dockerfile`'s runtime stage — `openai-whisper` also pulls in
+`torch`, which meaningfully increases image size and build time, so
+this is left as a deliberate opt-in rather than baked into the base
+image.)
+
+**Ingest media into the collection:**
+
+```bash
+python3 scripts/ingest_media.py --dir data/media/
+```
+
+Walks the directory, dispatches `.mp3/.wav/.m4a/.mp4/.mov/.webm/.ogg/.flac`
+to Whisper and `.png/.jpg/.jpeg/.tiff/.bmp` to Tesseract, chunks the
+output (`backend/knowledge/media_chunker.py`), and idempotently adds it
+to `media_index` — same skip-existing-by-id behavior as
+`ingest_corpus.py`. Whisper transcripts are windowed into ~45s chunks
+(`--window-seconds` to change) with a `[source start-end s]` locator
+baked into the chunk text, so citations can point back to the exact
+moment in a recording; segments whose detected language is Hindi,
+Sanskrit, or Nepali are logged as worth a human cross-check against the
+`vedic_scholar` corpus rather than auto-routed (agents never call each
+other, so ingestion just flags it — a person moves it manually if
+warranted).
+
 ## RAG corpus
 
 The `vedic_texts` collection is the canonical source for `vedic_scholar`
@@ -363,16 +409,18 @@ See `training/README.md` for shipping a trained model to LM Studio.
 The backend ships with an offline-friendly pytest suite covering
 chunker, classifier, retriever, dispatcher, LLM / embedding
 clients, database, auth, rate-limiting, multi-turn threading,
-communication-agent escalation, and the Sanskrit Heritage parser.
+communication-agent escalation, the Sanskrit Heritage parser, and the
+media pipeline (chunking + the whisper/pytesseract-unavailable path).
 All HTTP traffic is mocked with `respx` and ChromaDB runs
-in-memory, so the suite is fully hermetic.
+in-memory, so the suite is fully hermetic — it never needs the real
+Whisper/Tesseract binaries.
 
 ```bash
 python3 -m pip install --user pytest pytest-asyncio respx pytest-httpx
 python3 -m pytest -q
 ```
 
-Expect ~5–8 seconds for 86 tests on a warm machine (the agent
+Expect ~10–15 seconds for 101 tests on a warm machine (the agent
 end-to-end tests dominate the wall-clock).
 
 ## Layout

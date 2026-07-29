@@ -95,6 +95,14 @@ class Settings(BaseSettings):
     # auto-detected when present.
     sanskrit_heritage_input_scheme: str = "RN"
 
+    # Media pipeline (Phase 6). Whisper transcribes audio/video into the
+    # `media_index` collection; Tesseract OCRs images. Both are optional,
+    # heavy, lazily-imported dependencies (see backend/media/) — the media
+    # agent and /health degrade gracefully when they're not installed.
+    whisper_model_size: str = "base"
+    whisper_device: str = "cpu"
+    ocr_language: str = "eng"
+
     admin_email: str = ""
     local_timezone: str = "Asia/Kolkata"
 

@@ -33,7 +33,16 @@ slowapi>=0.1.9,<1.0
 # always resolve it as a metadata-only dep.
 packaging>=23.0
 
-# --- Phase 6: Media (uncomment when starting Phase 6) ---
+# --- Phase 6: Media (uncomment to enable) ---
+# The media agent (backend/agents/media_engine.py) and /health degrade
+# gracefully — whisper_available/ocr_available report False — when these
+# aren't installed, so it's safe to leave commented until you actually
+# want transcription/OCR. Uncommenting alone is NOT enough for Docker:
+# openai-whisper needs the `ffmpeg` binary and pytesseract needs the
+# `tesseract-ocr` binary, neither of which are pip packages — add both
+# to backend/Dockerfile's runtime-stage apt-get install list too.
+# openai-whisper also pulls in torch (~2GB) — expect a much larger,
+# slower-to-build image once enabled.
 # openai-whisper>=20240930
 # pytesseract>=0.3.13
 # ffmpeg-python>=0.2.0

@@ -30,6 +30,7 @@ from fastapi.responses import StreamingResponse
 from . import database
 from .admin_api import router as admin_router
 from .config import get_settings
+from .media import ocr, transcribe
 from .models.llm_client import get_llm_client
 from .persona import store as persona_store
 from .rag import vector_store
@@ -118,6 +119,10 @@ def create_app() -> FastAPI:
                 "chroma": {
                     "reachable": chroma_ok,
                     "collections": collection_counts,
+                },
+                "media": {
+                    "whisper_available": transcribe.is_available(),
+                    "ocr_available": ocr.is_available(),
                 },
                 "database": {"path": str(settings.sqlite_path)},
             },
