@@ -1,0 +1,20 @@
+[Unit]
+Description=Vedanta AI full-stack bootstrap check (network, cluster, models, app, smoke tests)
+After=network-online.target docker.service llama-master.service
+Wants=network-online.target
+# Give NetworkManager time to bring up the interconnect links and for
+# llama-master.service to already be starting before we probe it.
+
+[Service]
+Type=oneshot
+ExecStart=%h/Github/vedanta-ai/cluster/bootstrap.sh
+# Don't fail the boot sequence if a check fails — this is a diagnostic
+# run, not a hard dependency. Results go to the journal and
+# cluster/.last_bootstrap_status regardless of exit code.
+SuccessExitStatus=0 1
+# Must exceed bootstrap.sh's own MODEL_LOAD_TIMEOUT_S (default 600s) plus
+# headroom for the rest of the checks.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=llama.cpp RPC worker (cluster GPU offload)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/start_worker.sh
+Restart=on-failure
+RestartSec=3
+# Bind only to the private cluster interconnect IP, never 0.0.0.0 —
+# ggml-rpc-server has no authentication and must not be reachable from
+# Wi-Fi/LAN. Override per-node via a drop-in if the interconnect IP differs.
+Environment=BIND_HOST=10.0.0.2
+Environment=PORT=50052
+# See llama-master.service.template for why: default memlock cap
+# (~15.2GB) is too small for pinned RDMA/CUDA_Host buffers on large
+# models. Needed on the worker side too, not just the master.
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=default.target

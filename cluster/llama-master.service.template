@@ -1,0 +1,34 @@
+[Unit]
+Description=llama.cpp cluster master (OpenAI-compatible API, RPC tensor-split)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Fill in MODEL_PATH before installing this unit (see cluster/README.md).
+Environment=MODEL_PATH=/home/vedantaai1/models/CHANGE_ME.gguf
+# 127.0.0.1 if only the host needs it; 172.17.0.1 (docker0 bridge IP) if
+# docker-compose services need to reach it via host.docker.internal —
+# either way, set API_KEY_FILE below when BIND_HOST != 127.0.0.1
+# (start_master.sh refuses to start otherwise).
+Environment=BIND_HOST=127.0.0.1
+Environment=PORT=8080
+# Set to 1 if the model fits on one node and you don't need tensor-split.
+Environment=SKIP_RPC=0
+# Points at a chmod-600 file containing just the raw key (see
+# cluster/README.md) — passed to llama-server via --api-key-file, which
+# (unlike --api-key) never appears in `ps`/`systemctl status`/cmdline.
+Environment=API_KEY_FILE=%h/Github/vedanta-ai/cluster/.llama_api_key.raw
+ExecStart=%h/Github/vedanta-ai/cluster/start_master.sh ${MODEL_PATH}
+Restart=on-failure
+RestartSec=3
+# Default systemd user-session memlock cap (~15.2GB) is too small for
+# pinned (CUDA_Host) buffers on models that don't fit in one node's RAM —
+# confirmed via a hung load: gdb/proc showed the process stuck in D-state
+# (disk sleep) right after a "cannot be used with preferred buffer type
+# CUDA_Host, using CPU instead" log line for 141 tensors. Uncapping this
+# is required for large RPC-split models.
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=default.target

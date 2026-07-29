@@ -66,3 +66,7 @@ data/media/_generated/
 # student names and personal questions — PII stays local, never in git)
 data/persona/
 training/.venv/
+
+# Cluster secrets / runtime state (see cluster/README.md)
+cluster/.llama_api_key*
+cluster/.last_bootstrap_status

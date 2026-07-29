@@ -1,0 +1,26 @@
+# Cluster node inventory.
+# Add a new node here when scaling beyond 2 machines — role determines which
+# start script to run on it (see start_master.sh / start_worker.sh).
+
+nodes:
+  - name: spark-5d09
+    role: master
+    user: vedantaai1
+    interconnect_ips:
+      - 10.0.0.1   # port 1 (enp1s0f0np0)
+      - 10.0.1.1   # port 2 (enP2p1s0f0np0)
+
+  - name: spark-593d
+    role: worker
+    user: vedantaai2
+    interconnect_ips:
+      - 10.0.0.2   # port 1 (peer of enp1s0f0np0)
+      - 10.0.1.2   # port 2 (peer of enP2p1s0f0np0)
+    rpc_port: 50052
+
+# To add a third node:
+#   1. Cable it into the interconnect switch/fabric and assign it the next
+#      /30 subnet (e.g. 10.0.2.1/30 <-> 10.0.2.2/30).
+#   2. Run cluster/setup_node.sh on it.
+#   3. Add an entry here with role: worker.
+#   4. Add its <ip>:<rpc_port> to the --rpc list in start_master.sh.
