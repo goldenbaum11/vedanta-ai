@@ -18,7 +18,8 @@ Environment=BIND_HOST=10.0.0.2
 Environment=PORT=8081
 Environment=SKIP_RPC=1
 Environment=API_KEY_FILE=%h/.llama_api_key.raw
-ExecStart=%h/start_master.sh ${MODEL_PATH}
+# --reasoning off: see llama-32b-master.service.template for why.
+ExecStart=%h/start_master.sh ${MODEL_PATH} --reasoning off
 Restart=on-failure
 RestartSec=3
 LimitMEMLOCK=infinity

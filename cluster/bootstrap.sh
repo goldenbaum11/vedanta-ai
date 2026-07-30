@@ -282,6 +282,28 @@ section "8. App stack (docker-compose)"
   else
     record FAIL "frontend not reachable on :3000"
   fi
+
+  # NEXT_PUBLIC_API_BASE_URL is baked into the frontend's client-side JS
+  # bundle at build time (see frontend/Dockerfile) — a stale bundle built
+  # against the old default (http://localhost:8000) silently breaks every
+  # fetch (login, chat, everything) for anyone loading the page from a
+  # different machine than the server, since "localhost" then resolves to
+  # *their* machine, not this one. Every check above still passes in that
+  # state (they all curl from this host, where localhost is correct) —
+  # this is the only check that would have caught it. See the "failed to
+  # fetch" incident this guards against.
+  CONFIGURED_API_URL="$(grep -m1 '^NEXT_PUBLIC_API_BASE_URL=' "$REPO_DIR/.env" 2>/dev/null | cut -d= -f2-)"
+  if [ -z "$CONFIGURED_API_URL" ]; then
+    record FAIL "NEXT_PUBLIC_API_BASE_URL not set in .env (frontend would default to http://localhost:8000, broken for any remote browser)"
+  elif sg docker -c "docker exec vedanta-ai-frontend-1 grep -rl '$CONFIGURED_API_URL' .next/static" >/dev/null 2>&1; then
+    record PASS "frontend bundle matches configured NEXT_PUBLIC_API_BASE_URL ($CONFIGURED_API_URL)"
+  else
+    record FAIL "frontend bundle does NOT contain configured NEXT_PUBLIC_API_BASE_URL ($CONFIGURED_API_URL) — stale build, rebuild with: docker compose build frontend && docker compose up -d frontend"
+  fi
+  if [ "$CONFIGURED_API_URL" != "http://localhost:8000" ] && \
+     sg docker -c "docker exec vedanta-ai-frontend-1 grep -rl 'http://localhost:8000' .next/static" >/dev/null 2>&1; then
+    record FAIL "frontend bundle still contains the http://localhost:8000 default alongside the configured URL — likely a partial/mixed build, rebuild frontend"
+  fi
 else
   section "8. App stack: skipped (--no-app)"
 fi

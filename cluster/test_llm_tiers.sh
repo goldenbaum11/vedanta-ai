@@ -7,15 +7,16 @@
 #
 #   quick    - fast health checks across every endpoint (no inference,
 #              sub-few-seconds total) — "is anything obviously down"
-#   thinking - verifies Qwen3's reasoning-model behavior specifically:
-#              a tight max_tokens budget should produce reasoning_content
-#              (thinking) with empty content, and a generous budget should
-#              produce real content. This is a regression guard for the
-#              bug that broke bootstrap.sh's inference check (see
-#              docs/adr/0002-serving-model-qwen3-235b-a22b.md and the
-#              max_tokens fix in bootstrap.sh section 4) — a tight budget
-#              silently consumed entirely by thinking must not be
-#              mistaken for a broken model.
+#   thinking - verifies Qwen3's reasoning-model behavior is correct on
+#              EACH tier, in opposite directions by design: the 235B RPC
+#              tier should still be thinking (reasoning_content present
+#              under a tight budget, real content once given room — a
+#              regression guard for the bug that broke bootstrap.sh's
+#              inference check), while the standalone 32B tier should NOT
+#              be thinking at all (--reasoning off — a regression guard
+#              for the ~15-20s-per-request slowdown that caused, since
+#              the app's intent classifier and default chat both hit this
+#              tier on every request).
 #   unit     - each backend tested individually and directly (bypassing
 #              the load balancer for the standalone tier's two instances),
 #              full chat-completion round trip, response validated against
@@ -89,7 +90,9 @@ section "quick: endpoint health"
 run_thinking() {
 section "thinking: Qwen3 reasoning-model behavior"
 # ---------------------------------------------------------------------
-  for entry in "235B RPC tier:$RPC_URL" "32B standalone:$STANDALONE_MASTER_URL"; do
+  # 235B RPC tier: reasoning stays ON deliberately — this is the opt-in
+  # "deep reasoning" mode (see docs/adr/0002-serving-model-qwen3-235b-a22b.md).
+  for entry in "235B RPC tier:$RPC_URL"; do
     label="${entry%%:*}"
     url="${entry#*:}"
 
@@ -118,6 +121,33 @@ assert msg.get('content'), 'content still empty with generous budget'
       record PASS "$label produces real content under generous max_tokens"
     else
       record FAIL "$label content still empty even with generous max_tokens (regression — see bootstrap.sh section 4 fix)"
+    fi
+  done
+
+  # Standalone 32B tier: reasoning is deliberately OFF (--reasoning off
+  # in llama-32b-{master,worker}.service.template) — this is the
+  # fast/interactive tier the app's intent classifier and default chat
+  # hit on every request. Qwen3's thinking mode added ~15-20s of
+  # invisible reasoning before any output even for a one-word classifier
+  # label, blowing past the app's ~1-5s responsiveness target ("failed to
+  # fetch"-adjacent incident: chat felt hung on a plain "hello"). These
+  # checks guard the opposite direction from the 235B ones above — a
+  # regression here (reasoning silently turning back on) would
+  # reintroduce that exact slowdown.
+  for entry in "32B master:$STANDALONE_MASTER_URL" "32B worker:$STANDALONE_WORKER_URL"; do
+    label="${entry%%:*}"
+    url="${entry#*:}"
+
+    RESP="$(chat "$url" 50)"
+    if echo "$RESP" | "$PY" -c "
+import sys, json
+msg = json.load(sys.stdin)['choices'][0]['message']
+assert msg.get('content'), 'no content'
+assert not msg.get('reasoning_content'), 'reasoning_content present — thinking mode is back on'
+" 2>/dev/null; then
+      record PASS "$label answers directly with reasoning off (no reasoning_content)"
+    else
+      record FAIL "$label reasoning mode regressed — check --reasoning off in llama-32b service units"
     fi
   done
 }

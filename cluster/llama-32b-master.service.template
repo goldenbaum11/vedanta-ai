@@ -30,7 +30,13 @@ Environment=PORT=8081
 # node, no tensor-split, no dependency on the worker's RPC link.
 Environment=SKIP_RPC=1
 Environment=API_KEY_FILE=%h/Github/vedanta-ai/cluster/.llama_api_key.raw
-ExecStart=%h/Github/vedanta-ai/cluster/start_master.sh ${MODEL_PATH}
+# --reasoning off: this is the fast/interactive tier (the app's intent
+# classifier and default chat both hit it) — Qwen3's thinking mode adds
+# ~15-20s of invisible reasoning before ANY output, even for a one-word
+# classifier label, which blew past the app's ~1-5s responsiveness target.
+# The 235B tier (llama-master.service) intentionally keeps reasoning on;
+# that's its whole purpose as the deep-reasoning mode.
+ExecStart=%h/Github/vedanta-ai/cluster/start_master.sh ${MODEL_PATH} --reasoning off
 Restart=on-failure
 RestartSec=3
 LimitMEMLOCK=infinity
