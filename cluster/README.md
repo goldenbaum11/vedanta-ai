@@ -164,6 +164,61 @@ systemctl --user restart llama-master.service
 Check status: `systemctl --user status llama-master`
 Logs: `journalctl --user -u llama-master -f`
 
+### Standalone 32B tier (redundancy + concurrency): `llama-32b.service` + Traefik
+
+Second, independent serving tier alongside the RPC-split master above —
+see [`docs/adr/0002-serving-model-qwen3-235b-a22b.md`](../docs/adr/0002-serving-model-qwen3-235b-a22b.md)
+for the full rationale. Where the RPC-split tier is one large model
+(currently Qwen3-235B-A22B) spanning both nodes for maximum
+capacity/quality, this tier runs the **same smaller model
+(Qwen3-32B-Q8_0, ~34GB) independently on each node** — no RPC, no
+cross-node dependency — so:
+
+- **Redundancy**: either node can serve on its own if the other (or the
+  RPC link) is down.
+- **Concurrency**: two requests can be served in parallel, one per node,
+  instead of one at a time.
+
+```
+        :8090 (Traefik, active health-checked)
+        ┌────────────┴────────────┐
+        ▼                         ▼
+  master :8081               worker :8081
+  llama-32b.service           llama-32b.service
+  (SKIP_RPC=1, local model)   (SKIP_RPC=1, local model)
+```
+
+- `cluster/llama-32b-master.service.template` /
+  `cluster/llama-32b-worker.service.template` — installed as
+  `llama-32b.service` in `~/.config/systemd/user/` on master and worker
+  respectively (same deploy pattern as `llama-master.service` above:
+  copy, `daemon-reload`, `enable --now`). Both set `SKIP_RPC=1`, port
+  `8081`, and point at a **local** copy of
+  `models/qwen3-32b/Qwen3-32B-Q8_0.gguf` — the model has to actually
+  exist on both nodes for this tier, unlike the RPC tier where only the
+  master needs the file.
+- `cluster/docker-compose.yml` + `cluster/traefik-dynamic.yml` — Traefik
+  reverse-proxies `:8090` to `127.0.0.1:8081` (master) and
+  `10.0.0.2:8081` (worker), with **active health checks** (polls each
+  backend's `/health` every 5s and pulls a dead one out of rotation
+  automatically — not passive/request-triggered like a plain nginx
+  setup). Deliberately its own compose file, not part of the root
+  `docker-compose.yml`: this container only proxies to host-run
+  `llama-server` processes, it never runs a model itself, keeping the
+  app-stack and cluster/LLM planes separate (see top-level `README.md`).
+  Bring it up: `docker compose -f cluster/docker-compose.yml up -d`.
+- Point the app at `http://host.docker.internal:8090/v1` (or
+  `http://localhost:8090/v1` for a native backend) instead of `:8080` to
+  use this tier instead of the RPC-split one.
+
+Both `llama-32b.service` units carry `StartLimitIntervalSec=600` /
+`StartLimitBurst=5` — caps runaway restarts if this tier ever wedges the
+way the RPC-split master originally did (60+ restarts in one boot before
+being root-caused; see ADR-002). Check with `systemctl --user status
+llama-32b`; a unit stuck in `start-limit-hit` needs `systemctl --user
+reset-failed llama-32b.service` once the underlying issue is fixed, not
+just another restart.
+
 ### Bootstrap everything at once: `bootstrap.sh`
 
 ```bash
@@ -171,7 +226,7 @@ cluster/bootstrap.sh            # cluster + docker-compose app stack
 cluster/bootstrap.sh --no-app   # cluster only
 ```
 
-Six checks, run in order, **every one always runs** (a failure in an
+Nine checks, run in order, **every one always runs** (a failure in an
 earlier section doesn't skip later sections — you get a full picture,
 not just the first problem):
 
@@ -183,8 +238,14 @@ not just the first problem):
    the server is ready)
 4. **Model inference** — an actual chat completion request, not just a
    health check, so a wedged/corrupt model gets caught
-5. **App stack** — `docker compose up`, backend `/health`, frontend
-6. **Agent domain smoke tests** — one real message per domain
+5. **Standalone 32B tier** — `llama-32b.service` active on master and
+   worker, each instance's `/health` responding independently
+6. **LLM load balancer** — Traefik container running, `:8090` responding
+7. **LLM tier test suite** — runs `cluster/test_llm_tiers.sh` (quick +
+   thinking + unit categories) and folds each of its checks into this
+   summary; see that script's header for what each category covers
+8. **App stack** — `docker compose up`, backend `/health`, frontend
+9. **Agent domain smoke tests** — one real message per domain
    (`vedic_scholar`, `sanskrit_grammar`, `communication`, `infosec`,
    `survival`, `media`) through the actual backend, asserting the
    classifier routed each to the right agent
@@ -268,9 +329,16 @@ OPENAI_COMPATIBLE_API_KEY=<contents of cluster/.llama_api_key.raw>
       the worker's GPU (CUDA graph warmup in worker logs) over **RDMA/RoCEv2**,
       and a full chat completion round-trip through `llama-server`'s
       OpenAI-compatible API succeeded
-- [x] Production model chosen: **Meta-Llama-3.1-405B-Instruct, Q4_K_M**
-      (6-shard GGUF, ~245GB on disk on the master), tensor-split across both
-      nodes via `--rpc 10.0.0.2:50052`
+- [x] Production model: **Qwen3-235B-A22B, UD-Q4_K_XL** (~134GB, 3-shard
+      GGUF on the master), tensor-split across both nodes via
+      `--rpc 10.0.0.2:50052`. Superseded Meta-Llama-3.1-405B-Instruct,
+      which never fit the cluster's combined RAM with usable headroom —
+      see [`docs/adr/0002-serving-model-qwen3-235b-a22b.md`](../docs/adr/0002-serving-model-qwen3-235b-a22b.md)
+      for the full incident/decision writeup
+- [x] Standalone redundant/concurrent tier added: Qwen3-32B-Q8_0 running
+      independently on both nodes (`llama-32b.service`, `SKIP_RPC=1`),
+      behind a Traefik load balancer (`cluster/docker-compose.yml`) on
+      `:8090` with active health checks
 - [x] `llama-master.service` installed and enabled on spark-5d09 for
       persistence — survives reboot/logout, confirmed via
       `systemctl --user status llama-master` (active, auto-restart)

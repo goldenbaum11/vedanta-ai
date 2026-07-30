@@ -1,0 +1,27 @@
+[Unit]
+Description=llama.cpp standalone 32B instance on worker (redundant/concurrent tier, no RPC)
+After=network-online.target
+Wants=network-online.target
+# See llama-32b-master.service.template for why this cap exists.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# See llama-32b-master.service.template for why Q4_K_M, not Q8_0.
+Environment=MODEL_PATH=/home/vedantaai2/models/qwen3-32b/Qwen3-32B-Q4_K_M.gguf
+# Bind to the private cluster interconnect IP (not 0.0.0.0/127.0.0.1) so
+# the master's nginx load-balancer container can reach it over the
+# RDMA/ethernet interconnect while it stays unreachable from Wi-Fi/LAN.
+# Requires API_KEY_FILE since BIND_HOST != 127.0.0.1.
+Environment=BIND_HOST=10.0.0.2
+Environment=PORT=8081
+Environment=SKIP_RPC=1
+Environment=API_KEY_FILE=%h/.llama_api_key.raw
+ExecStart=%h/start_master.sh ${MODEL_PATH}
+Restart=on-failure
+RestartSec=3
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=default.target

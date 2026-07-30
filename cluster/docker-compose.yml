@@ -1,0 +1,42 @@
+# Load balancer for the standalone/redundant 32B tier (see
+# docs/adr/0002-serving-model-qwen3-235b-a22b.md): two independent
+# llama-server instances — master:8081 and worker:8081, each SKIP_RPC=1,
+# no dependency on each other — behind one endpoint on :8090, so either
+# node can serve requests and Traefik actively health-checks both.
+#
+# Deliberately its own compose file, not part of the root docker-compose.yml
+# — the app stack (backend/frontend/chroma/postgres) and the cluster/LLM
+# tier are separate planes by project convention (see README.md: "The LLM
+# always runs on the host or on a dedicated machine — never inside the
+# Docker stack"). This container only proxies to host-run llama-server
+# processes; it never runs a model itself.
+#
+# Usage: docker compose -f cluster/docker-compose.yml up -d
+# (bootstrap.sh runs this automatically; see section "6. LLM load balancer")
+
+services:
+  llm-lb:
+    image: traefik:v3.2
+    container_name: vedanta-llm-lb
+    restart: unless-stopped
+    # host networking: reaches 127.0.0.1:8081 (master) and 10.0.0.2:8081
+    # (worker, over the cluster interconnect) directly, no bridge NAT.
+    network_mode: host
+    command:
+      - "--providers.file.filename=/etc/traefik/dynamic.yml"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:8090"
+      # Separate port for Traefik's own liveness ping, away from :8080
+      # (already used by llama-master.service) and :8081/:8090.
+      - "--entrypoints.ping.address=:8091"
+      - "--ping=true"
+      - "--ping.entrypoint=ping"
+      - "--api=false"
+    volumes:
+      - ./traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping", "--ping.entrypoint=ping", "--entrypoints.ping.address=:8091"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

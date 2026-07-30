@@ -1,0 +1,39 @@
+[Unit]
+Description=llama.cpp standalone 32B instance on master (redundant/concurrent tier, no RPC)
+After=network-online.target
+Wants=network-online.target
+# Cap runaway restarts: if this ever wedges into a crash loop (as the
+# RPC-split master did — see docs/adr/0002-serving-model-qwen3-235b-a22b.md),
+# stop retrying after 5 failures within 10 minutes instead of hammering the
+# machine indefinitely. `systemctl --user status` will show "start-limit-hit";
+# `systemctl --user reset-failed` clears it once the underlying issue is fixed.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Fill in MODEL_PATH before installing this unit (see cluster/README.md).
+# Q4_K_M (~19.8GB), not Q8_0 (~34.8GB): this tier stays resident
+# permanently alongside the RPC-split 235B tier on the same two nodes.
+# At Q8_0 the combined footprint (235B + 2x32B) left only ~10GB headroom
+# across the whole cluster for KV cache/context — the same thin-margin
+# trap that killed the original 405B attempt. Q4_K_M frees ~30GB combined.
+Environment=MODEL_PATH=/home/vedantaai1/models/qwen3-32b/Qwen3-32B-Q4_K_M.gguf
+# 127.0.0.1 is enough: the nginx load-balancer container
+# (cluster/start_loadbalancer.sh) runs with --network host, so it reaches
+# this instance directly without any docker0-bridge translation. We still
+# set API_KEY_FILE below (harmless, and applied regardless of bind host)
+# so both legs of the redundant tier enforce the same auth.
+Environment=BIND_HOST=127.0.0.1
+Environment=PORT=8081
+# This is the standalone/redundant tier by design: model fits on one
+# node, no tensor-split, no dependency on the worker's RPC link.
+Environment=SKIP_RPC=1
+Environment=API_KEY_FILE=%h/Github/vedanta-ai/cluster/.llama_api_key.raw
+ExecStart=%h/Github/vedanta-ai/cluster/start_master.sh ${MODEL_PATH}
+Restart=on-failure
+RestartSec=3
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=default.target

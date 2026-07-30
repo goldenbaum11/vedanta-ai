@@ -1,0 +1,26 @@
+# Dynamic config for the standalone/redundant 32B tier's load balancer
+# (see docs/adr/0002-serving-model-qwen3-235b-a22b.md and
+# cluster/docker-compose.yml). Traefik polls each server's healthCheck
+# path on its own timer — a backend that stops responding is pulled out
+# of rotation automatically within one interval, no failed user request
+# required (unlike nginx's passive-only checks).
+
+http:
+  routers:
+    llm:
+      rule: "PathPrefix(`/`)"
+      service: llm-backends
+      entryPoints:
+        - web
+
+  services:
+    llm-backends:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8081"   # master: llama-32b.service
+          - url: "http://10.0.0.2:8081"    # worker: llama-32b.service
+        passHostHeader: true
+        healthCheck:
+          path: /health
+          interval: "5s"
+          timeout: "3s"

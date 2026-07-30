@@ -2,6 +2,16 @@
 Description=llama.cpp cluster master (OpenAI-compatible API, RPC tensor-split)
 After=network-online.target
 Wants=network-online.target
+# Cap runaway restarts: this unit crash-looped 60+ times in one boot when
+# the RPC worker connection wedged and it fell back to loading the full
+# model locally (OOM every ~2-4 min) — see
+# docs/adr/0002-serving-model-qwen3-235b-a22b.md. Stop retrying after 5
+# failures within 10 minutes instead of hammering the machine forever.
+# `systemctl --user status` will show "start-limit-hit" when this trips;
+# `systemctl --user reset-failed` clears it once the underlying issue
+# (usually the RPC worker) is fixed.
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=simple

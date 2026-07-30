@@ -125,11 +125,22 @@ if [ -n "$LLAMA_URL" ]; then
   API_KEY_FILE="$SCRIPT_DIR/.llama_api_key.raw"
   AUTH_HEADER=()
   [ -f "$API_KEY_FILE" ] && AUTH_HEADER=(-H "Authorization: Bearer $(cat "$API_KEY_FILE")")
+  # max_tokens well above 10: Qwen3 (and other reasoning models) spend
+  # tokens on "reasoning_content" (thinking) before any visible "content" —
+  # a tight budget can be consumed entirely by thinking, leaving content
+  # empty even though the model is working correctly. Accept either field
+  # being non-empty so this check reflects real inference health, not a
+  # thinking-budget artifact.
   RESP="$(curl -sf "${LLAMA_URL}/v1/chat/completions" \
     -H "Content-Type: application/json" "${AUTH_HEADER[@]}" \
-    -d '{"messages":[{"role":"user","content":"Reply with exactly: bootstrap ok"}],"max_tokens":10}' \
+    -d '{"messages":[{"role":"user","content":"Reply with exactly: bootstrap ok"}],"max_tokens":100}' \
     2>/dev/null)"
-  if echo "$RESP" | "$PY" -c "import sys,json; d=json.load(sys.stdin); assert d['choices'][0]['message']['content']" 2>/dev/null; then
+  if echo "$RESP" | "$PY" -c "
+import sys, json
+d = json.load(sys.stdin)
+msg = d['choices'][0]['message']
+assert msg.get('content') or msg.get('reasoning_content')
+" 2>/dev/null; then
     MODEL_NAME="$(echo "$RESP" | "$PY" -c "import sys,json; print(json.load(sys.stdin).get('model','?'))" 2>/dev/null)"
     record PASS "model inference OK (model: $MODEL_NAME)"
   else
@@ -140,8 +151,113 @@ else
 fi
 
 # ---------------------------------------------------------------------
+section "5. Standalone 32B tier (redundant/concurrent, no RPC)"
+# ---------------------------------------------------------------------
+# See docs/adr/0002-serving-model-qwen3-235b-a22b.md — a second,
+# independent model tier (Qwen3-32B, one instance per node, no RPC
+# dependency) so the system keeps serving if the RPC-split master or
+# either single node goes down.
+if ! systemctl --user is-active --quiet llama-32b.service; then
+  echo "  master llama-32b.service not active, attempting start..."
+  systemctl --user start llama-32b.service
+  sleep 3
+fi
+if systemctl --user is-active --quiet llama-32b.service; then
+  record PASS "master llama-32b.service active"
+else
+  record FAIL "master llama-32b.service NOT active"
+fi
+
+while IFS=$'\t' read -r user_host rpc_port; do
+  [ -z "$user_host" ] && continue
+  host="${user_host#*@}"
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$user_host" \
+      'systemctl --user is-active --quiet llama-32b.service' 2>/dev/null; then
+    echo "  $user_host: llama-32b.service not active, attempting start..."
+    ssh -o BatchMode=yes "$user_host" 'systemctl --user start llama-32b.service' 2>/dev/null
+    sleep 3
+  fi
+  if ssh -o BatchMode=yes -o ConnectTimeout=5 "$user_host" \
+      'systemctl --user is-active --quiet llama-32b.service' 2>/dev/null; then
+    record PASS "$user_host llama-32b.service active"
+  else
+    record FAIL "$user_host llama-32b.service NOT active"
+  fi
+done <<< "$WORKERS"
+
+API_KEY_FILE="$SCRIPT_DIR/.llama_api_key.raw"
+AUTH_HEADER=()
+[ -f "$API_KEY_FILE" ] && AUTH_HEADER=(-H "Authorization: Bearer $(cat "$API_KEY_FILE")")
+STANDALONE_TIMEOUT_S="${STANDALONE_TIMEOUT_S:-180}"
+for target in "master:127.0.0.1" "worker:10.0.0.2"; do
+  label="${target%%:*}"
+  host="${target##*:}"
+  UP=0
+  for i in $(seq 1 "$STANDALONE_TIMEOUT_S"); do
+    if curl -sf "${AUTH_HEADER[@]}" "http://${host}:8081/health" >/dev/null 2>&1; then
+      UP=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$UP" = "1" ]; then
+    record PASS "$label 32B instance /health responding ($host:8081)"
+  else
+    record FAIL "$label 32B instance /health not responding ($host:8081, waited ${STANDALONE_TIMEOUT_S}s)"
+  fi
+done
+
+# ---------------------------------------------------------------------
+section "6. LLM load balancer"
+# ---------------------------------------------------------------------
+if ! sg docker -c "docker inspect vedanta-llm-lb" >/dev/null 2>&1 || \
+   [ "$(sg docker -c "docker inspect -f '{{.State.Running}}' vedanta-llm-lb" 2>/dev/null)" != "true" ]; then
+  echo "  vedanta-llm-lb not running, attempting start..."
+  sg docker -c "docker compose -f $SCRIPT_DIR/docker-compose.yml up -d" || true
+  sleep 3
+fi
+if [ "$(sg docker -c "docker inspect -f '{{.State.Running}}' vedanta-llm-lb" 2>/dev/null)" = "true" ]; then
+  record PASS "vedanta-llm-lb (Traefik) container running"
+else
+  record FAIL "vedanta-llm-lb (Traefik) container NOT running"
+fi
+# Traefik actively health-checks both backends on its own timer (see
+# cluster/traefik-dynamic.yml) — :8090 itself returning any HTTP status
+# means the proxy is up; 503 there means Traefik is up but has already
+# detected both backends are down, which bootstrap section 5 above
+# already reports on individually.
+if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/health 2>/dev/null | grep -qE '^[0-9]+$'; then
+  record PASS "load balancer :8090 responding"
+else
+  record FAIL "load balancer :8090 not responding"
+fi
+
+# ---------------------------------------------------------------------
+section "7. LLM tier test suite (quick/thinking/unit)"
+# ---------------------------------------------------------------------
+# Deeper behavioral checks than the health/routing checks above — see
+# cluster/test_llm_tiers.sh for what each category covers (in particular
+# "thinking", a regression guard for the Qwen3 reasoning-content budget
+# issue that broke section 4's inference check — see ADR-002). Runs as
+# its own script (independently useful on its own) and its per-check
+# results are folded into this summary via process substitution, not a
+# pipe, so they actually affect $PASS/$FAIL in this shell rather than a
+# subshell that throws the count away.
+if [ -x "$SCRIPT_DIR/test_llm_tiers.sh" ]; then
+  TEST_OUTPUT="$("$SCRIPT_DIR/test_llm_tiers.sh" all 2>&1)"
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    status="${line%%  *}"
+    msg="${line#*  }"
+    record "$status" "llm-tests: $msg"
+  done < <(echo "$TEST_OUTPUT" | awk '/^== Summary ==$/{flag=1; next} /^[0-9]+ passed/{flag=0} flag')
+else
+  record FAIL "cluster/test_llm_tiers.sh not found or not executable"
+fi
+
+# ---------------------------------------------------------------------
 if [ "$WITH_APP" = "1" ]; then
-section "5. App stack (docker-compose)"
+section "8. App stack (docker-compose)"
   cd "$REPO_DIR"
   if sg docker -c "docker compose up -d" >/tmp/vedanta-bootstrap-compose.log 2>&1; then
     record PASS "docker compose up"
@@ -167,12 +283,12 @@ section "5. App stack (docker-compose)"
     record FAIL "frontend not reachable on :3000"
   fi
 else
-  section "5. App stack: skipped (--no-app)"
+  section "8. App stack: skipped (--no-app)"
 fi
 
 # ---------------------------------------------------------------------
 if [ "$WITH_APP" = "1" ] && [ "$WITH_DOMAIN_TESTS" = "1" ]; then
-section "6. Agent domain smoke tests (end-to-end through backend)"
+section "9. Agent domain smoke tests (end-to-end through backend)"
   declare -A DOMAIN_MSGS=(
     [vedic_scholar]="Translate Bhagavad Gita verse 2.47 into English."
     [sanskrit_grammar]="Explain the sandhi rule in this Sanskrit compound word."
@@ -194,7 +310,7 @@ section "6. Agent domain smoke tests (end-to-end through backend)"
     fi
   done
 else
-  section "6. Agent domain smoke tests: skipped"
+  section "9. Agent domain smoke tests: skipped"
 fi
 
 # ---------------------------------------------------------------------
