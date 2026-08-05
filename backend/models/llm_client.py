@@ -454,6 +454,7 @@ class OpenAICompatibleClient:
 
 
 _client: LLMClient | None = None
+_deep_reasoning_client: LLMClient | None = None
 
 
 def _build_client() -> LLMClient:
@@ -471,7 +472,29 @@ def get_llm_client() -> LLMClient:
     return _client
 
 
+def get_deep_reasoning_llm_client() -> LLMClient:
+    """Singleton accessor for the optional deep-reasoning tier.
+
+    Falls back to `get_llm_client()` (the default tier) when
+    `DEEP_REASONING_BASE_URL` isn't configured, so callers can use this
+    unconditionally without special-casing the unconfigured case.
+    """
+    global _deep_reasoning_client
+    if _deep_reasoning_client is None:
+        settings = get_settings()
+        if not settings.deep_reasoning_base_url:
+            return get_llm_client()
+        _deep_reasoning_client = OpenAICompatibleClient(
+            base_url=settings.deep_reasoning_base_url,
+            default_model=settings.deep_reasoning_model or None,
+            api_key=settings.deep_reasoning_api_key or settings.openai_compatible_api_key,
+            timeout_seconds=settings.deep_reasoning_timeout_seconds,
+        )
+    return _deep_reasoning_client
+
+
 def reset_llm_client() -> None:
-    """Drop the cached client. Useful in tests and after env changes."""
-    global _client
+    """Drop the cached clients. Useful in tests and after env changes."""
+    global _client, _deep_reasoning_client
     _client = None
+    _deep_reasoning_client = None

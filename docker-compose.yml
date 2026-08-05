@@ -41,7 +41,13 @@ services:
       start_period: 10s
 
   chroma:
-    image: chromadb/chroma:latest
+    # Pinned, not :latest — the backend's chromadb client is pinned to
+    # <1.0 (requirements.txt) for API stability, but :latest had drifted
+    # to server v1.4.4, whose collection-creation response schema the
+    # 0.6.x client can't parse (KeyError: '_type'). Discovered while
+    # ingesting the vedic_texts corpus. Keep this in lockstep with
+    # whatever `chromadb` version backend/requirements.txt pins.
+    image: chromadb/chroma:0.6.3
     restart: unless-stopped
     environment:
       IS_PERSISTENT: "TRUE"
@@ -81,6 +87,9 @@ services:
       OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL:-http://host.docker.internal:1234/v1}
       OPENAI_COMPATIBLE_MODEL: ${OPENAI_COMPATIBLE_MODEL:-}
       OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY:-lm-studio}
+      DEEP_REASONING_BASE_URL: ${DEEP_REASONING_BASE_URL:-}
+      DEEP_REASONING_MODEL: ${DEEP_REASONING_MODEL:-}
+      DEEP_REASONING_API_KEY: ${DEEP_REASONING_API_KEY:-}
 
       # --- embeddings ---
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-default}

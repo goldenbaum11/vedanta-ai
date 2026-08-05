@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     openai_compatible_api_key: str = "lm-studio"
     openai_compatible_timeout_seconds: float = 120.0
 
+    # Optional second, slower/deeper OpenAI-compatible endpoint for agents
+    # that specifically benefit from a reasoning model (currently just
+    # vedic_scholar — multi-verse synthesis, cross-commentary reconciliation).
+    # Empty base_url -> falls back to the default openai_compatible_* client
+    # above, so this is safe to leave unset. Longer default timeout: the
+    # RPC-split deep-reasoning tier observed ~30-45s round trips even for
+    # short prompts, well past the default 120s being risky under load.
+    deep_reasoning_base_url: str = ""
+    deep_reasoning_model: str = ""
+    deep_reasoning_api_key: str = ""  # empty -> reuse openai_compatible_api_key
+    deep_reasoning_timeout_seconds: float = 300.0
+
     # Embeddings. "default" uses ChromaDB's bundled all-MiniLM-L6-v2
     # (English-only). "openai_compatible" hits a /v1/embeddings endpoint
     # (recommended; LM Studio's nomic-embed-text-v1.5 is multilingual and

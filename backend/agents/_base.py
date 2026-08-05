@@ -20,6 +20,7 @@ from typing import Any, AsyncIterator
 
 from ..models.llm_client import (
     ChatMessage,
+    LLMClient,
     LLMUnavailableError,
     _build_messages,
     get_llm_client,
@@ -68,18 +69,23 @@ async def respond_with_llm(
     metadata_extra: dict[str, Any] | None = None,
     escalate: bool = False,
     fallback_text: str | None = None,
+    llm_client: LLMClient | None = None,
 ) -> AgentResponse:
     """Call the local LLM with the agent's system prompt; degrade gracefully.
 
     If the LLM is unreachable we return a clearly-marked stub response so
     the rest of the pipeline (UI, audit log) still functions during dev.
+
+    `llm_client` defaults to the process-wide default (`get_llm_client()`)
+    — pass an explicit client (e.g. `get_deep_reasoning_llm_client()`) for
+    an agent that needs a different tier.
     """
     metadata: dict[str, Any] = {"agent": agent, **(metadata_extra or {})}
     history = _history_from_context(context)
     if history:
         metadata["history_turns"] = len(history)
     try:
-        llm = get_llm_client()
+        llm = llm_client or get_llm_client()
         messages = _build_messages(system_prompt, query, history)
         text = await llm.complete_messages(messages)
         metadata["model"] = llm.default_model
@@ -113,6 +119,7 @@ async def respond_with_llm_stream(
     metadata_extra: dict[str, Any] | None = None,
     escalate: bool = False,
     fallback_text: str | None = None,
+    llm_client: LLMClient | None = None,
 ) -> AsyncIterator[StreamEvent]:
     """Stream the LLM response as a sequence of events.
 
@@ -137,7 +144,7 @@ async def respond_with_llm_stream(
         metadata["history_turns"] = len(history)
 
     try:
-        llm = get_llm_client()
+        llm = llm_client or get_llm_client()
         metadata["model"] = llm.default_model
     except Exception as exc:  # noqa: BLE001 - configuration-level errors only
         logger.warning("Agent %s could not resolve LLM client: %s", agent, exc)

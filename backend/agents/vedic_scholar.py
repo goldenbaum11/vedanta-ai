@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncIterator
 
+from ..models.llm_client import get_deep_reasoning_llm_client
 from ..rag import retriever
 from ..schemas import AgentResponse
 from ._base import StreamEvent, respond_with_llm, respond_with_llm_stream
@@ -95,6 +96,13 @@ async def handle(query: str, context: dict[str, Any]) -> AgentResponse:
         context=context,
         citations=citations,
         metadata_extra=_metadata_extra(citations),
+        # Multi-verse synthesis and cross-commentary reconciliation
+        # (Advaita/Vishishtadvaita/Dvaita) benefit from actual reasoning —
+        # the only agent routed to the deep tier; see
+        # docs/adr/0002-serving-model-qwen3-235b-a22b.md. Falls back to the
+        # default (fast) client automatically if DEEP_REASONING_BASE_URL
+        # isn't configured.
+        llm_client=get_deep_reasoning_llm_client(),
     )
 
 
@@ -109,5 +117,6 @@ async def handle_stream(
         context=context,
         citations=citations,
         metadata_extra=_metadata_extra(citations),
+        llm_client=get_deep_reasoning_llm_client(),
     ):
         yield event
