@@ -19,6 +19,20 @@ passages, a working LoRA fine-tuning pipeline with an admin console, and
 a two-node llama.cpp cluster. You would own the path from "works" to
 "sounds like Jonas."
 
+## Current stack (open to change)
+
+- **Serving**: llama.cpp on a two-node Linux cluster (RPC tensor-split,
+  Qwen3-235B MoE), LM Studio/Ollama for smaller models
+- **Fine-tuning**: LoRA via MLX (Apple Silicon), Qwen2.5 base models
+- **Retrieval**: ChromaDB vector store with multilingual embeddings
+- **Backend**: Python / FastAPI, Postgres, Docker
+- **Frontend**: Next.js
+
+This is where we are, not where we must stay. We're after the best
+solution — if you can make the case for a different model family,
+trainer, or serving stack, that's exactly the judgment we're hiring
+for. Only the two rules under "How we work" are fixed.
+
 ## Key responsibilities
 
 **1. Evaluate the current implementation**
