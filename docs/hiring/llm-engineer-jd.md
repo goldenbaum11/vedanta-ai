@@ -21,9 +21,12 @@ a two-node llama.cpp cluster. You would own the path from "works" to
 
 ## Current stack (open to change)
 
-- **Serving**: llama.cpp on a two-node Linux cluster (RPC tensor-split,
-  Qwen3-235B MoE), LM Studio/Ollama for smaller models
-- **Fine-tuning**: LoRA via MLX (Apple Silicon), Qwen2.5 base models
+- **Serving**: llama.cpp on a two-node Linux cluster, two model tiers:
+  - Qwen3-32B — fast tier for chat and intent routing, one standalone
+    instance per node behind a load balancer
+  - Qwen3-235B (MoE) — deep-reasoning tier for scripture synthesis,
+    tensor-split across both nodes via RPC
+- **Fine-tuning**: LoRA via MLX (Apple Silicon), Qwen2.5-7B base
 - **Retrieval**: ChromaDB vector store with multilingual embeddings
 - **Backend**: Python / FastAPI, Postgres, Docker
 - **Frontend**: Next.js
