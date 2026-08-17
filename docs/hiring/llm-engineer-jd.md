@@ -19,6 +19,13 @@ passages, a working LoRA fine-tuning pipeline with an admin console, and
 a two-node llama.cpp cluster. You would own the path from "works" to
 "sounds like Jonas."
 
+**The raw material is the real asset.** We hold a large archive that is
+not yet in the system: years of recorded classes (audio/video), lesson
+transcripts, course texts, and study materials in Portuguese and
+English. A central part of this role is putting that history together —
+transcribing, cleaning, organizing — and turning it into what the
+assistant learns from and cites.
+
 ## Current stack (open to change)
 
 - **Serving**: llama.cpp on a two-node Linux cluster, two model tiers:
