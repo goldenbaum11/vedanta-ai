@@ -121,10 +121,13 @@ class Settings(BaseSettings):
     # Persona pipeline (admin page). Transcripts are parsed for this
     # speaker label; names listed in `persona_scrub_names` are replaced
     # with "the student" in extracted pairs (PII). Training runs in the
-    # dedicated venv under training/ — see training/README.md.
+    # dedicated venv under training/ — see training/README.md. Base model
+    # tracks the interactive serving tier (ADR-003 Decision C) — trained
+    # and run on the same box the backend runs on (NVIDIA CUDA cluster
+    # node), not Apple Silicon/MLX.
     persona_target_speaker: str = "Jonas M"
     persona_scrub_names: str = ""  # comma-separated, e.g. "Fabiana,Uma"
-    persona_base_model: str = "mlx-community/Qwen2.5-7B-Instruct-4bit"
+    persona_base_model: str = "unsloth/Qwen3.8-27B"
     persona_training_python: str = ""  # empty -> training/.venv/bin/python
 
     app_host: str = "127.0.0.1"

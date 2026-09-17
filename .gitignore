@@ -12,6 +12,8 @@ __pycache__/
 venv/
 env/
 .venv/
+.venv-diarize/
+unsloth_compiled_cache/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/

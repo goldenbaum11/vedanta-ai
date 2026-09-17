@@ -1,4 +1,18 @@
-# Training environment for the persona LoRA (Apple Silicon / MLX).
+# Training environment for the persona LoRA (NVIDIA CUDA / Linux cluster).
 # Installed into training/.venv by training/setup.sh — keep out of the
 # backend requirements; the FastAPI app never imports any of this.
-mlx-lm>=0.20
+#
+# torch is intentionally NOT listed here: install it separately first,
+# matching the CUDA build actually on the box (see setup.sh), then install
+# this file so pip doesn't resolve a mismatched wheel as a transitive dep.
+#
+# unsloth version unpinned above a floor because its compatible
+# torch/CUDA/transformers combo shifts fast — confirm with the smoke test
+# in the project plan before trusting this on new hardware.
+unsloth>=2025.1
+transformers>=4.46
+peft>=0.13
+trl>=0.12
+bitsandbytes>=0.44
+accelerate>=1.0
+datasets>=3.0

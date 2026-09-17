@@ -1,0 +1,9 @@
+# Environment for scripts/diarize_transcript.py (Linux / CUDA).
+# Installed into scripts/.venv-diarize by scripts/setup_diarize.sh — kept
+# out of both the backend and training requirements; nothing else imports
+# this. WhisperX pulls in torch + faster-whisper + pyannote.audio.
+#
+# torch is intentionally left unpinned here: install it first, matching
+# the CUDA build actually present on the box (see setup_diarize.sh), then
+# install this file so pip doesn't pull a mismatched wheel.
+whisperx>=3.3
