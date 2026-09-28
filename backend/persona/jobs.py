@@ -28,8 +28,14 @@ from pathlib import Path
 from typing import Any
 
 from ..config import get_settings
+from ..models.llm_client import build_client_with_timeout
 from . import PERSONA_SYSTEM_PROMPT
 from . import extraction, store
+
+# Background extraction can tolerate a much slower LLM response than live
+# chat should — a long, dense segment occasionally runs past the default
+# (chat-tuned) timeout under load.
+EXTRACTION_LLM_TIMEOUT_SECONDS = 300.0
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +121,10 @@ async def _run_extraction(job_id: int, transcript_id: int) -> None:
             if n.strip()
         ]
         pairs = await extraction.extract_pairs(
-            extraction.turns_to_dicts(turns), scrub_names=scrub, log=log
+            extraction.turns_to_dicts(turns),
+            scrub_names=scrub,
+            log=log,
+            llm_client=build_client_with_timeout(EXTRACTION_LLM_TIMEOUT_SECONDS),
         )
         inserted = await store.insert_pairs(transcript_id, pairs)
         await store.update_transcript(

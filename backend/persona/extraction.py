@@ -175,14 +175,46 @@ def turns_to_dicts(turns: list[Turn]) -> list[dict[str, Any]]:
 # --- Stage 2: Q&A pair extraction ------------------------------------------
 
 
+def _split_long_paragraph(para: str, target_words: int) -> list[str]:
+    """Fallback for a single paragraph with no internal breaks (e.g. a raw,
+    unformatted transcript dump): split on sentence boundaries instead."""
+    sentences = re.split(r"(?<=[.?!])\s+", para)
+    chunks: list[str] = []
+    current: list[str] = []
+    count = 0
+    for sent in sentences:
+        wc = len(sent.split())
+        if current and count + wc > target_words:
+            chunks.append(" ".join(current))
+            current, count = [], 0
+        current.append(sent)
+        count += wc
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
+
+
 def split_segments(text: str, target_words: int = SEGMENT_TARGET_WORDS) -> list[str]:
-    """Split a long turn into ~target_words segments on paragraph boundaries."""
+    """Split a long turn into ~target_words segments on paragraph boundaries.
+
+    Falls back to sentence-boundary splitting for any paragraph well over
+    target_words on its own — otherwise a transcript with no "\\n\\n" breaks
+    at all (common in raw, unformatted dumps) becomes exactly one oversized
+    segment regardless of length, risking LLM request timeouts and diluted
+    extraction quality on long files.
+    """
     paragraphs = [p for p in text.split("\n\n") if p.strip()]
     segments: list[str] = []
     current: list[str] = []
     count = 0
     for para in paragraphs:
         wc = len(para.split())
+        if wc > target_words * 1.5:
+            if current:
+                segments.append("\n\n".join(current))
+                current, count = [], 0
+            segments.extend(_split_long_paragraph(para, target_words))
+            continue
         if current and count + wc > target_words:
             segments.append("\n\n".join(current))
             current, count = [], 0
@@ -269,11 +301,18 @@ async def extract_pairs(
     scrub_names: list[str] | None = None,
     min_answer_words: int = DEFAULT_MIN_ANSWER_WORDS,
     log: LogFn | None = None,
+    llm_client: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Stage 2: LLM extraction of Q&A pairs from stage-1 turns.
 
     ``log`` is an optional async callback — the admin job runner passes
     one that persists lines to the job's log so the UI can stream them.
+
+    A single segment failing (LLM timeout/connection blip) is logged and
+    skipped rather than aborting the whole turn/transcript — otherwise one
+    bad segment out of dozens discards every pair already found in the
+    others. ``llm_client`` lets callers pass one configured with a longer
+    timeout than live chat needs, since this runs as a background job.
     """
 
     async def _log(line: str) -> None:
@@ -281,7 +320,7 @@ async def extract_pairs(
         if log is not None:
             await log(line)
 
-    client = get_llm_client()
+    client = llm_client or get_llm_client()
     pairs: list[dict[str, Any]] = []
 
     for turn in turns:
@@ -303,11 +342,17 @@ async def extract_pairs(
             f"{len(segments)} segment(s)"
         )
         for seg_idx, segment in enumerate(segments):
-            response = await client.complete(
-                _EXTRACTION_SYSTEM_PROMPT,
-                f"Transcript segment:\n\n{segment}",
-                temperature=0.1,
-            )
+            try:
+                response = await client.complete(
+                    _EXTRACTION_SYSTEM_PROMPT,
+                    f"Transcript segment:\n\n{segment}",
+                    temperature=0.1,
+                )
+            except Exception as exc:  # noqa: BLE001 - one bad segment shouldn't sink the file
+                await _log(
+                    f"  segment {seg_idx + 1}/{len(segments)}: SKIPPED ({exc})"
+                )
+                continue
             extracted = parse_json_array(response)
             await _log(f"  segment {seg_idx + 1}/{len(segments)}: {len(extracted)} pair(s)")
             for item in extracted:

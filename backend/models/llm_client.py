@@ -464,6 +464,16 @@ def _build_client() -> LLMClient:
     return OllamaClient()
 
 
+def build_client_with_timeout(timeout_seconds: float) -> LLMClient:
+    """A fresh (non-singleton) client on the default tier with a custom
+    timeout — for background jobs (e.g. persona extraction) that can
+    tolerate a slower LLM response than live chat should."""
+    provider = get_settings().llm_provider
+    if provider == "openai_compatible":
+        return OpenAICompatibleClient(timeout_seconds=timeout_seconds)
+    return OllamaClient(timeout_seconds=timeout_seconds)
+
+
 def get_llm_client() -> LLMClient:
     """Process-wide singleton accessor; switches on `LLM_PROVIDER`."""
     global _client
