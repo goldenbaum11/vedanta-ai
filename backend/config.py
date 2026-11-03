@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = 60.0
 
     database_url: str = f"sqlite:///{PROJECT_ROOT / 'vedanta.db'}"
+    # Local/docker-compose Postgres doesn't use SSL at all (default
+    # "disable" preserves that). Managed providers (DigitalOcean, RDS,
+    # etc.) require SSL but their resolved connection strings don't
+    # reliably carry a parseable `sslmode` query param — so this is its
+    # own explicit setting rather than something sniffed out of the URL.
+    # "require" = encrypt without verifying the cert (matches libpq's own
+    # definition of "require", weaker than "verify-ca"/"verify-full").
+    database_ssl_mode: Literal["disable", "require", "verify-ca", "verify-full"] = (
+        "disable"
+    )
 
     # ChromaDB connection. When `chroma_host` is set, the backend
     # talks to a Chroma server over HTTP (Docker prod). Otherwise it

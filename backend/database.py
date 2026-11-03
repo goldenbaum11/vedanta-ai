@@ -214,20 +214,22 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _ssl_arg_for(query: str) -> bool | ssl.SSLContext | None:
-    """Translate a libpq-style ``sslmode`` query param into asyncpg's ``ssl=``.
+def _ssl_arg_for(mode: str) -> bool | ssl.SSLContext | None:
+    """Translate ``settings.database_ssl_mode`` into asyncpg's ``ssl=`` kwarg.
 
-    Managed Postgres providers (DigitalOcean, RDS, etc.) hand out
-    connection strings with ``?sslmode=require`` by default. In libpq,
-    ``require`` means "encrypt, but don't bother verifying the server
-    certificate" — it's deliberately weaker than ``verify-ca``/
-    ``verify-full``. Passing bare ``ssl=True`` to asyncpg instead builds a
-    *verifying* context, which then rejects the provider's self-signed
-    cert with ``CERTIFICATE_VERIFY_FAILED`` — so ``require`` needs its own
-    non-verifying context, not plain ``True``.
+    Driven by an explicit setting rather than sniffed from the connection
+    string: managed providers' *resolved* DATABASE_URL (e.g. DigitalOcean
+    App Platform's ``${db.DATABASE_URL}`` binding) doesn't reliably carry
+    a parseable ``sslmode`` query param, even though the server still
+    requires SSL — asyncpg's own default (no explicit ``ssl=``) ends up
+    negotiating a *verifying* TLS context regardless, which then rejects
+    the provider's self-signed cert with ``CERTIFICATE_VERIFY_FAILED``.
+
+    ``require`` (libpq's own definition) means "encrypt, but don't bother
+    verifying the server certificate" — deliberately weaker than
+    ``verify-ca``/``verify-full``.
     """
-    mode = dict(parse_qsl(query)).get("sslmode", "").lower()
-    if mode in ("", "disable", "allow"):
+    if mode == "disable":
         return None
     if mode == "require":
         ctx = ssl.create_default_context()
@@ -286,12 +288,12 @@ def get_engine() -> AsyncEngine:
     """Return the process-global async engine, creating it on first call."""
     global _engine
     if _engine is None:
-        raw = get_settings().database_url
-        url = _normalize_database_url(raw)
+        settings = get_settings()
+        url = _normalize_database_url(settings.database_url)
         _ensure_sqlite_dir(url)
         connect_args: dict[str, Any] = {}
         if url.startswith("postgresql+asyncpg://"):
-            ssl_arg = _ssl_arg_for(urlparse(raw).query)
+            ssl_arg = _ssl_arg_for(settings.database_ssl_mode)
             if ssl_arg is not None:
                 connect_args["ssl"] = ssl_arg
         _engine = create_async_engine(
