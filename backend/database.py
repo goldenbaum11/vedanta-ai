@@ -29,11 +29,12 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from sqlalchemy import (
     Column,
@@ -213,6 +214,29 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _ssl_arg_for(query: str) -> bool | ssl.SSLContext | None:
+    """Translate a libpq-style ``sslmode`` query param into asyncpg's ``ssl=``.
+
+    Managed Postgres providers (DigitalOcean, RDS, etc.) hand out
+    connection strings with ``?sslmode=require`` by default. In libpq,
+    ``require`` means "encrypt, but don't bother verifying the server
+    certificate" — it's deliberately weaker than ``verify-ca``/
+    ``verify-full``. Passing bare ``ssl=True`` to asyncpg instead builds a
+    *verifying* context, which then rejects the provider's self-signed
+    cert with ``CERTIFICATE_VERIFY_FAILED`` — so ``require`` needs its own
+    non-verifying context, not plain ``True``.
+    """
+    mode = dict(parse_qsl(query)).get("sslmode", "").lower()
+    if mode in ("", "disable", "allow"):
+        return None
+    if mode == "require":
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    return True  # verify-ca / verify-full: use asyncpg's verifying default
+
+
 def _normalize_database_url(raw: str) -> str:
     """Translate user-friendly URLs to async-driver URLs.
 
@@ -220,6 +244,12 @@ def _normalize_database_url(raw: str) -> str:
     * ``postgres://user@h/db``     → ``postgresql+asyncpg://user@h/db``
     * ``postgresql://user@h/db``   → ``postgresql+asyncpg://user@h/db``
     * URLs that already specify a driver are passed through untouched.
+
+    ``sslmode`` is stripped from the query string either way — asyncpg's
+    connect() doesn't accept that libpq-style kwarg at all (raises
+    ``TypeError: unexpected keyword argument 'sslmode'``); SSL is instead
+    requested via ``connect_args`` in ``get_engine()``, using the value
+    this function read here before stripping it.
     """
     if not raw:
         raise ValueError("DATABASE_URL is empty")
@@ -230,9 +260,11 @@ def _normalize_database_url(raw: str) -> str:
     if scheme == "sqlite":
         return raw.replace("sqlite://", "sqlite+aiosqlite://", 1)
     if scheme in {"postgres", "postgresql"}:
-        # asyncpg is fussy about ssl=True flags in the query string;
-        # we leave the rest of the URL alone.
-        return raw.replace(f"{scheme}://", "postgresql+asyncpg://", 1)
+        query = urlencode(
+            [(k, v) for k, v in parse_qsl(parsed.query) if k != "sslmode"]
+        )
+        cleaned = urlunparse(parsed._replace(scheme="postgresql+asyncpg", query=query))
+        return cleaned
     return raw
 
 
@@ -254,12 +286,19 @@ def get_engine() -> AsyncEngine:
     """Return the process-global async engine, creating it on first call."""
     global _engine
     if _engine is None:
-        url = _normalize_database_url(get_settings().database_url)
+        raw = get_settings().database_url
+        url = _normalize_database_url(raw)
         _ensure_sqlite_dir(url)
+        connect_args: dict[str, Any] = {}
+        if url.startswith("postgresql+asyncpg://"):
+            ssl_arg = _ssl_arg_for(urlparse(raw).query)
+            if ssl_arg is not None:
+                connect_args["ssl"] = ssl_arg
         _engine = create_async_engine(
             url,
             future=True,
             pool_pre_ping=True,
+            connect_args=connect_args,
             # SQLite needs ``check_same_thread=False`` for our async
             # use; SQLAlchemy + aiosqlite handles this correctly under
             # the default settings, no special connect_args needed.
