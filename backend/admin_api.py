@@ -31,7 +31,7 @@ from . import database
 from .config import get_settings
 from .persona import extraction, jobs, store
 from .security import audit_log
-from .security.auth import AuthenticatedUser, current_admin
+from .security.auth import AuthenticatedUser, current_admin, current_reviewer_or_admin
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -155,7 +155,7 @@ async def list_pairs(
     status: str | None = None,
     transcript_id: int | None = None,
     limit: int = 200,
-    _admin: AuthenticatedUser = Depends(current_admin),
+    _admin: AuthenticatedUser = Depends(current_reviewer_or_admin),
 ) -> dict[str, object]:
     if limit <= 0 or limit > 1000:
         raise HTTPException(status_code=400, detail="limit must be in (0, 1000]")
@@ -169,7 +169,7 @@ async def list_pairs(
 async def update_pair(
     pair_id: int,
     req: PairUpdate,
-    admin: AuthenticatedUser = Depends(current_admin),
+    admin: AuthenticatedUser = Depends(current_reviewer_or_admin),
 ) -> dict[str, object]:
     pair = await store.get_pair(pair_id)
     if pair is None:

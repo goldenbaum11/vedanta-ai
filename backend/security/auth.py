@@ -236,3 +236,21 @@ async def current_admin(
             detail="Admin role required.",
         )
     return user
+
+
+async def current_reviewer_or_admin(
+    user: AuthenticatedUser = Depends(current_user),
+) -> AuthenticatedUser:
+    """Require `admin` or the restricted `reviewer` role.
+
+    `reviewer` exists for external collaborators who should only see/act on
+    persona Q&A pairs — never transcripts, training, deployment, or user
+    management. Grant it with:
+        python3 scripts/make_admin.py --email <email> --role reviewer
+    """
+    if user.role not in ("admin", "reviewer"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or reviewer role required.",
+        )
+    return user

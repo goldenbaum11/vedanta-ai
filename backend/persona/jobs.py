@@ -44,6 +44,16 @@ logger = logging.getLogger(__name__)
 _tasks: dict[int, asyncio.Task[None]] = {}
 _training_lock = asyncio.Lock()
 
+# The interactive LLM tier runs with no parallel slots configured (single
+# request at a time) — letting an unbounded number of extraction jobs fire
+# concurrently just means every job's requests queue up behind each other
+# server-side, and each one's own client-side timeout clock keeps running
+# while it waits its turn. A bounded semaphore keeps a few jobs genuinely
+# in flight (so the queue never empties) without piling on so many that
+# individual requests time out just from queueing.
+_EXTRACTION_CONCURRENCY = 3
+_extraction_semaphore = asyncio.Semaphore(_EXTRACTION_CONCURRENCY)
+
 VAL_FRACTION = 0.1
 
 
@@ -90,56 +100,57 @@ async def _run_extraction(job_id: int, transcript_id: int) -> None:
     async def log(line: str) -> None:
         await store.append_job_log(job_id, line)
 
-    await store.set_job_status(job_id, "running")
-    try:
-        transcript = await store.get_transcript(transcript_id)
-        if transcript is None:
-            raise RuntimeError(f"transcript {transcript_id} not found")
-        path = Path(transcript["content_path"])
-        text = path.read_text(encoding="utf-8")
-        target = transcript["target_speaker"]
-
-        await log(f"Stage 1: extracting turns for {target!r} from {transcript['filename']}")
-        speakers = extraction.list_speakers(text)
-        await log(f"Speakers found: {', '.join(speakers) or '(none)'}")
-        turns = extraction.extract_turns(text, target_speaker=target)
-        total_words = sum(t.word_count for t in turns)
-        await log(f"Stage 1 done: {len(turns)} turn(s), {total_words} words")
-        if not turns:
-            raise RuntimeError(
-                f"no turns found for speaker {target!r} — check the speaker label"
-            )
-        await store.update_transcript(
-            transcript_id, status="extracting", turn_count=len(turns)
-        )
-
-        await log("Stage 2: extracting Q&A pairs with the local LLM...")
-        settings = get_settings()
-        scrub = [
-            n.strip()
-            for n in (getattr(settings, "persona_scrub_names", "") or "").split(",")
-            if n.strip()
-        ]
-        pairs = await extraction.extract_pairs(
-            extraction.turns_to_dicts(turns),
-            scrub_names=scrub,
-            log=log,
-            llm_client=build_client_with_timeout(EXTRACTION_LLM_TIMEOUT_SECONDS),
-        )
-        inserted = await store.insert_pairs(transcript_id, pairs)
-        await store.update_transcript(
-            transcript_id, status="review", pair_count=inserted
-        )
-        await log(f"Done. {inserted} pair(s) waiting for review.")
-        await store.set_job_status(job_id, "succeeded")
-    except Exception as exc:  # noqa: BLE001 - job errors land in the job row
-        logger.exception("extraction job %d failed", job_id)
-        await store.append_job_log(job_id, f"ERROR: {exc}")
-        await store.set_job_status(job_id, "failed", error=str(exc))
+    async with _extraction_semaphore:
+        await store.set_job_status(job_id, "running")
         try:
-            await store.update_transcript(transcript_id, status="failed")
-        except Exception:  # noqa: BLE001
-            pass
+            transcript = await store.get_transcript(transcript_id)
+            if transcript is None:
+                raise RuntimeError(f"transcript {transcript_id} not found")
+            path = Path(transcript["content_path"])
+            text = path.read_text(encoding="utf-8")
+            target = transcript["target_speaker"]
+
+            await log(f"Stage 1: extracting turns for {target!r} from {transcript['filename']}")
+            speakers = extraction.list_speakers(text)
+            await log(f"Speakers found: {', '.join(speakers) or '(none)'}")
+            turns = extraction.extract_turns(text, target_speaker=target)
+            total_words = sum(t.word_count for t in turns)
+            await log(f"Stage 1 done: {len(turns)} turn(s), {total_words} words")
+            if not turns:
+                raise RuntimeError(
+                    f"no turns found for speaker {target!r} — check the speaker label"
+                )
+            await store.update_transcript(
+                transcript_id, status="extracting", turn_count=len(turns)
+            )
+
+            await log("Stage 2: extracting Q&A pairs with the local LLM...")
+            settings = get_settings()
+            scrub = [
+                n.strip()
+                for n in (getattr(settings, "persona_scrub_names", "") or "").split(",")
+                if n.strip()
+            ]
+            pairs = await extraction.extract_pairs(
+                extraction.turns_to_dicts(turns),
+                scrub_names=scrub,
+                log=log,
+                llm_client=build_client_with_timeout(EXTRACTION_LLM_TIMEOUT_SECONDS),
+            )
+            inserted = await store.insert_pairs(transcript_id, pairs)
+            await store.update_transcript(
+                transcript_id, status="review", pair_count=inserted
+            )
+            await log(f"Done. {inserted} pair(s) waiting for review.")
+            await store.set_job_status(job_id, "succeeded")
+        except Exception as exc:  # noqa: BLE001 - job errors land in the job row
+            logger.exception("extraction job %d failed", job_id)
+            await store.append_job_log(job_id, f"ERROR: {exc}")
+            await store.set_job_status(job_id, "failed", error=str(exc))
+            try:
+                await store.update_transcript(transcript_id, status="failed")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # --- Dataset export ---------------------------------------------------------
