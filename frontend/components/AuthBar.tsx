@@ -20,9 +20,15 @@ interface Props {
    * server-side history fetch by `user:N` once a user signs in.
    */
   onAuthStateChange?: (profile: AuthProfile | null) => void;
+  /**
+   * Hide the register option so only existing accounts can sign in.
+   * Used on pages (e.g. /review) where accounts are provisioned by an
+   * admin rather than self-registered.
+   */
+  hideRegister?: boolean;
 }
 
-export function AuthBar({ onAuthStateChange }: Props) {
+export function AuthBar({ onAuthStateChange, hideRegister }: Props) {
   const [profile, setProfile] = useState<AuthProfile | null>(null);
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -94,15 +100,17 @@ export function AuthBar({ onAuthStateChange }: Props) {
       className="flex flex-wrap items-center gap-2 text-xs"
       aria-label={mode === "register" ? "Register" : "Sign in"}
     >
-      <select
-        value={mode}
-        onChange={(event) => setMode(event.target.value as Mode)}
-        disabled={busy}
-        className="rounded-md border border-ink-200 bg-white px-2 py-1 dark:border-ink-700 dark:bg-ink-900"
-      >
-        <option value="login">Sign in</option>
-        <option value="register">Register</option>
-      </select>
+      {hideRegister ? null : (
+        <select
+          value={mode}
+          onChange={(event) => setMode(event.target.value as Mode)}
+          disabled={busy}
+          className="rounded-md border border-ink-200 bg-white px-2 py-1 dark:border-ink-700 dark:bg-ink-900"
+        >
+          <option value="login">Sign in</option>
+          <option value="register">Register</option>
+        </select>
+      )}
       <input
         type="email"
         autoComplete="email"

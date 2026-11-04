@@ -36,7 +36,7 @@ export default function ReviewLayout({
         <h1 className="font-serif text-2xl font-semibold text-ink-900 dark:text-ink-50">
           Persona Pairs Review
         </h1>
-        <AuthBar />
+        <AuthBar hideRegister />
       </div>
 
       {!hydrated ? null : !allowed ? (
