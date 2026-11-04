@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { fetchHealth, fetchMessages, AGENT_LABELS } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -20,13 +21,21 @@ export default async function DashboardPage() {
 
   return (
     <section className="space-y-6">
-      <header>
-        <h1 className="font-serif text-2xl font-semibold">Admin dashboard</h1>
-        <p className="text-sm text-ink-500">
-          Phase {health?.phase ?? 2} view: health probes, corpus inventory, and
-          the most recent message exchanges. Authentication and per-user
-          controls land in Phase 4.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-serif text-2xl font-semibold">Admin dashboard</h1>
+          <p className="text-sm text-ink-500">
+            Phase {health?.phase ?? 2} view: health probes, corpus inventory, and
+            the most recent message exchanges. Authentication and per-user
+            controls land in Phase 4.
+          </p>
+        </div>
+        <Link
+          href="/review"
+          className="shrink-0 rounded-md bg-saffron-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-saffron-700"
+        >
+          Review pairs
+        </Link>
       </header>
 
       {error ? (
