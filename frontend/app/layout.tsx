@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AdminNavLink } from "@/components/AdminNavLink";
+import { HeaderNav } from "@/components/HeaderNav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -29,21 +29,7 @@ export default function RootLayout({
                 </span>
                 Vedanta AI
               </Link>
-              <nav className="flex items-center gap-4 text-sm">
-                <Link
-                  href="/"
-                  className="text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"
-                >
-                  Chat
-                </Link>
-                <Link
-                  href="/dashboard"
-                  className="text-ink-600 hover:text-ink-900 dark:text-ink-300 dark:hover:text-white"
-                >
-                  Dashboard
-                </Link>
-                <AdminNavLink />
-              </nav>
+              <HeaderNav />
             </div>
           </header>
           <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
