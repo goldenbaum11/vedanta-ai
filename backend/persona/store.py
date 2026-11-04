@@ -132,9 +132,10 @@ async def list_pairs(
     status: str | None = None,
     transcript_id: int | None = None,
     limit: int = 200,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
-    params: dict[str, Any] = {"limit": limit}
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
     if status:
         clauses.append("status = :status")
         params["status"] = status
@@ -142,10 +143,30 @@ async def list_pairs(
         clauses.append("transcript_id = :transcript_id")
         params["transcript_id"] = transcript_id
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    stmt = text(f"SELECT * FROM persona_pairs {where} ORDER BY id ASC LIMIT :limit")
+    stmt = text(
+        f"SELECT * FROM persona_pairs {where} ORDER BY id ASC LIMIT :limit OFFSET :offset"
+    )
     async with database.get_connection() as conn:
         result = await conn.execute(stmt, params)
         return _rows(result)
+
+
+async def count_pairs(
+    *, status: str | None = None, transcript_id: int | None = None
+) -> int:
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+    if status:
+        clauses.append("status = :status")
+        params["status"] = status
+    if transcript_id is not None:
+        clauses.append("transcript_id = :transcript_id")
+        params["transcript_id"] = transcript_id
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    stmt = text(f"SELECT COUNT(*) FROM persona_pairs {where}")
+    async with database.get_connection() as conn:
+        result = await conn.execute(stmt, params)
+        return result.scalar_one()
 
 
 async def update_pair(

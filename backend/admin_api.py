@@ -155,14 +155,18 @@ async def list_pairs(
     status: str | None = None,
     transcript_id: int | None = None,
     limit: int = 200,
+    offset: int = 0,
     _admin: AuthenticatedUser = Depends(current_reviewer_or_admin),
 ) -> dict[str, object]:
     if limit <= 0 or limit > 1000:
         raise HTTPException(status_code=400, detail="limit must be in (0, 1000]")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
     pairs = await store.list_pairs(
-        status=status, transcript_id=transcript_id, limit=limit
+        status=status, transcript_id=transcript_id, limit=limit, offset=offset
     )
-    return {"pairs": pairs}
+    total = await store.count_pairs(status=status, transcript_id=transcript_id)
+    return {"pairs": pairs, "total": total, "offset": offset, "limit": limit}
 
 
 @router.patch("/pairs/{pair_id}")

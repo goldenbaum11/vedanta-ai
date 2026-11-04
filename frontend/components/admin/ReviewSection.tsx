@@ -1,43 +1,74 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pair, listPairs, updatePair } from "@/lib/admin";
+
+const PAGE_SIZE = 50;
 
 export function ReviewSection() {
   const [pairs, setPairs] = useState<Pair[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [statusFilter, setStatusFilter] = useState("pending");
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState({ question: "", answer: "" });
+  // How many pairs are currently loaded, kept in a ref so the periodic
+  // auto-refresh can re-fetch exactly that many without resetting
+  // progress a reviewer made by clicking "Load more".
+  const loadedCountRef = useRef(PAGE_SIZE);
 
-  const load = useCallback(async () => {
+  const refresh = useCallback(async () => {
     try {
-      const res = await listPairs({ status: statusFilter || undefined });
+      const res = await listPairs({
+        status: statusFilter || undefined,
+        limit: loadedCountRef.current,
+      });
       setPairs(res.pairs);
+      setTotal(res.total);
     } catch {
       /* ignore */
     }
   }, [statusFilter]);
 
   useEffect(() => {
-    void load();
-    const interval = setInterval(load, 10000);
+    loadedCountRef.current = PAGE_SIZE;
+    void refresh();
+    const interval = setInterval(refresh, 10000);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [refresh]);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const res = await listPairs({
+        status: statusFilter || undefined,
+        offset: pairs.length,
+        limit: PAGE_SIZE,
+      });
+      setPairs((prev) => [...prev, ...res.pairs]);
+      setTotal(res.total);
+      loadedCountRef.current += res.pairs.length;
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function setStatus(id: number, status: string) {
     await updatePair(id, { status });
-    await load();
+    await refresh();
   }
 
   async function saveEdit(id: number) {
     await updatePair(id, { question: draft.question, answer: draft.answer });
     setEditing(null);
-    await load();
+    await refresh();
   }
 
   return (
     <div>
-      <div className="mb-3 flex gap-2 text-sm">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         {["pending", "approved", "rejected", ""].map((s) => (
           <button
             key={s || "all"}
@@ -51,6 +82,9 @@ export function ReviewSection() {
             {s || "all"}
           </button>
         ))}
+        <span className="ml-auto text-xs text-ink-500 dark:text-ink-400">
+          showing {pairs.length} of {total}
+        </span>
       </div>
       <div className="space-y-3">
         {pairs.length === 0 && (
@@ -140,6 +174,15 @@ export function ReviewSection() {
           </div>
         ))}
       </div>
+      {pairs.length < total && (
+        <button
+          onClick={() => void loadMore()}
+          disabled={loadingMore}
+          className="mt-3 w-full rounded-md bg-ink-100 px-3 py-2 text-sm hover:bg-ink-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-ink-800 dark:hover:bg-ink-700"
+        >
+          {loadingMore ? "Loading…" : `Load ${Math.min(PAGE_SIZE, total - pairs.length)} more`}
+        </button>
+      )}
     </div>
   );
 }

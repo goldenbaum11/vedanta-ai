@@ -119,11 +119,15 @@ export function getJob(id: number): Promise<Job> {
 export function listPairs(params: {
   status?: string;
   transcript_id?: number;
-}): Promise<{ pairs: Pair[] }> {
+  limit?: number;
+  offset?: number;
+}): Promise<{ pairs: Pair[]; total: number; offset: number; limit: number }> {
   const qs = new URLSearchParams();
   if (params.status) qs.set("status", params.status);
   if (params.transcript_id != null)
     qs.set("transcript_id", String(params.transcript_id));
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
   return request(`/api/v1/admin/pairs?${qs.toString()}`);
 }
 
