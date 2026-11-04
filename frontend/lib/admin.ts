@@ -42,6 +42,7 @@ export interface Pair {
   status: "pending" | "approved" | "rejected";
   created_at: string;
   reviewed_at: string | null;
+  reviewed_by: string | null;
 }
 
 export interface DatasetStats {

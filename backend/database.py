@@ -154,6 +154,9 @@ persona_pairs_table = Table(
     Column("status", String(32), nullable=False, server_default=text("'pending'")),
     Column("created_at", String(64), nullable=False),
     Column("reviewed_at", String(64)),
+    # Email of the admin/reviewer who last set `status`, so the review UI
+    # can show who approved/rejected/edited a pair.
+    Column("reviewed_by", String(128)),
     Index("idx_persona_pairs_transcript", "transcript_id"),
     Index("idx_persona_pairs_status", "status"),
 )
@@ -375,6 +378,16 @@ async def _migrate_messages(conn: AsyncConnection) -> None:
             await conn.execute(text(f"ALTER TABLE messages ADD COLUMN {ddl}"))
 
 
+async def _migrate_persona_pairs(conn: AsyncConnection) -> None:
+    """Idempotent ALTER TABLE migration adding `reviewed_by` for legacy DBs."""
+    cols = await _existing_columns(conn, "persona_pairs")
+    if not cols:
+        return  # fresh DB; create_all already covers everything
+    if "reviewed_by" not in cols:
+        logger.info("Migrating persona_pairs: adding column reviewed_by")
+        await conn.execute(text("ALTER TABLE persona_pairs ADD COLUMN reviewed_by VARCHAR(128)"))
+
+
 async def init_db() -> None:
     """Create all tables/indexes if absent, then run column-level migrations."""
     engine = get_engine()
@@ -383,6 +396,7 @@ async def init_db() -> None:
         # for tables that already exist with the right columns.
         await conn.run_sync(metadata.create_all)
         await _migrate_messages(conn)
+        await _migrate_persona_pairs(conn)
 
 
 # --- Inserts -------------------------------------------------------------

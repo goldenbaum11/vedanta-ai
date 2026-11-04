@@ -175,7 +175,11 @@ async def update_pair(
     if pair is None:
         raise HTTPException(status_code=404, detail="pair not found")
     updated = await store.update_pair(
-        pair_id, status=req.status, question=req.question, answer=req.answer
+        pair_id,
+        status=req.status,
+        question=req.question,
+        answer=req.answer,
+        reviewed_by=admin.email if req.status else None,
     )
     if req.status:
         await audit_log.record(

@@ -154,11 +154,13 @@ async def update_pair(
     status: str | None = None,
     question: str | None = None,
     answer: str | None = None,
+    reviewed_by: str | None = None,
 ) -> dict[str, Any] | None:
     updates: dict[str, Any] = {}
     if status is not None:
         updates["status"] = status
         updates["reviewed_at"] = _now()
+        updates["reviewed_by"] = reviewed_by
     if question is not None:
         updates["question"] = question
     if answer is not None:

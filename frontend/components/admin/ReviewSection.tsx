@@ -132,6 +132,7 @@ export function ReviewSection() {
                   <span className="ml-auto text-xs text-ink-500 dark:text-ink-400">
                     #{pair.id} · {pair.kind} ·{" "}
                     {pair.answer.split(/\s+/).length} words · {pair.status}
+                    {pair.reviewed_by ? ` · reviewed by ${pair.reviewed_by}` : ""}
                   </span>
                 </div>
               </>
