@@ -157,6 +157,12 @@ persona_pairs_table = Table(
     # Email of the admin/reviewer who last set `status`, so the review UI
     # can show who approved/rejected/edited a pair.
     Column("reviewed_by", String(128)),
+    # Portuguese translation of question/answer, shown on /review when the
+    # reviewer switches the language to PT. Filled by
+    # scripts/translate_pairs.py using the self-hosted LLM; NULL until then.
+    # Training data still uses the original `question`/`answer`.
+    Column("question_pt", Text),
+    Column("answer_pt", Text),
     Index("idx_persona_pairs_transcript", "transcript_id"),
     Index("idx_persona_pairs_status", "status"),
 )
@@ -379,13 +385,18 @@ async def _migrate_messages(conn: AsyncConnection) -> None:
 
 
 async def _migrate_persona_pairs(conn: AsyncConnection) -> None:
-    """Idempotent ALTER TABLE migration adding `reviewed_by` for legacy DBs."""
+    """Idempotent ALTER TABLE migrations for legacy persona_pairs tables."""
     cols = await _existing_columns(conn, "persona_pairs")
     if not cols:
         return  # fresh DB; create_all already covers everything
-    if "reviewed_by" not in cols:
-        logger.info("Migrating persona_pairs: adding column reviewed_by")
-        await conn.execute(text("ALTER TABLE persona_pairs ADD COLUMN reviewed_by VARCHAR(128)"))
+    for col_name, ddl in (
+        ("reviewed_by", "reviewed_by VARCHAR(128)"),
+        ("question_pt", "question_pt TEXT"),
+        ("answer_pt", "answer_pt TEXT"),
+    ):
+        if col_name not in cols:
+            logger.info("Migrating persona_pairs: adding column %s", col_name)
+            await conn.execute(text(f"ALTER TABLE persona_pairs ADD COLUMN {ddl}"))
 
 
 async def init_db() -> None:

@@ -43,6 +43,9 @@ export interface Pair {
   created_at: string;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  /** Portuguese translation; null until scripts/translate_pairs.py runs. */
+  question_pt?: string | null;
+  answer_pt?: string | null;
 }
 
 export interface DatasetStats {
@@ -133,7 +136,13 @@ export function listPairs(params: {
 
 export function updatePair(
   id: number,
-  patch: { status?: string; question?: string; answer?: string },
+  patch: {
+    status?: string;
+    question?: string;
+    answer?: string;
+    question_pt?: string;
+    answer_pt?: string;
+  },
 ): Promise<Pair> {
   return request(`/api/v1/admin/pairs/${id}`, {
     method: "PATCH",

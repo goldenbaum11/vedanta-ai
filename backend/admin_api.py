@@ -51,6 +51,9 @@ class PairUpdate(BaseModel):
     status: str | None = Field(default=None, pattern="^(pending|approved|rejected)$")
     question: str | None = None
     answer: str | None = None
+    # Portuguese translation (shown on /review in PT mode).
+    question_pt: str | None = None
+    answer_pt: str | None = None
 
 
 class TrainingStart(BaseModel):
@@ -156,6 +159,7 @@ async def list_pairs(
     transcript_id: int | None = None,
     limit: int = 200,
     offset: int = 0,
+    untranslated: bool = False,
     _admin: AuthenticatedUser = Depends(current_reviewer_or_admin),
 ) -> dict[str, object]:
     if limit <= 0 or limit > 1000:
@@ -163,9 +167,15 @@ async def list_pairs(
     if offset < 0:
         raise HTTPException(status_code=400, detail="offset must be >= 0")
     pairs = await store.list_pairs(
-        status=status, transcript_id=transcript_id, limit=limit, offset=offset
+        status=status,
+        transcript_id=transcript_id,
+        limit=limit,
+        offset=offset,
+        untranslated=untranslated,
     )
-    total = await store.count_pairs(status=status, transcript_id=transcript_id)
+    total = await store.count_pairs(
+        status=status, transcript_id=transcript_id, untranslated=untranslated
+    )
     return {"pairs": pairs, "total": total, "offset": offset, "limit": limit}
 
 
@@ -183,6 +193,8 @@ async def update_pair(
         status=req.status,
         question=req.question,
         answer=req.answer,
+        question_pt=req.question_pt,
+        answer_pt=req.answer_pt,
         reviewed_by=admin.email if req.status else None,
     )
     if req.status:

@@ -26,9 +26,20 @@ interface Props {
    * admin rather than self-registered.
    */
   hideRegister?: boolean;
+  /** Override the sign-in form's text (e.g. Portuguese on /review). */
+  labels?: Partial<typeof DEFAULT_LABELS>;
 }
 
-export function AuthBar({ onAuthStateChange, hideRegister }: Props) {
+const DEFAULT_LABELS = {
+  email: "email",
+  password: "password",
+  signIn: "Sign in",
+  signOut: "Sign out",
+  failed: "Authentication failed.",
+};
+
+export function AuthBar({ onAuthStateChange, hideRegister, labels }: Props) {
+  const L = { ...DEFAULT_LABELS, ...labels };
   const [profile, setProfile] = useState<AuthProfile | null>(null);
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -64,13 +75,13 @@ export function AuthBar({ onAuthStateChange, hideRegister }: Props) {
         setPassword("");
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : "Authentication failed.",
+          err instanceof Error ? err.message : L.failed,
         );
       } finally {
         setBusy(false);
       }
     },
-    [email, mode, password],
+    [email, mode, password, L.failed],
   );
 
   const signOut = useCallback(() => {
@@ -88,7 +99,7 @@ export function AuthBar({ onAuthStateChange, hideRegister }: Props) {
           onClick={signOut}
           className="rounded-md border border-ink-200 px-2 py-1 transition hover:bg-ink-50 dark:border-ink-700 dark:hover:bg-ink-800"
         >
-          Sign out
+          {L.signOut}
         </button>
       </div>
     );
@@ -114,7 +125,7 @@ export function AuthBar({ onAuthStateChange, hideRegister }: Props) {
       <input
         type="email"
         autoComplete="email"
-        placeholder="email"
+        placeholder={L.email}
         value={email}
         onChange={(event) => setEmail(event.target.value)}
         disabled={busy}
@@ -123,7 +134,7 @@ export function AuthBar({ onAuthStateChange, hideRegister }: Props) {
       <input
         type="password"
         autoComplete={mode === "register" ? "new-password" : "current-password"}
-        placeholder="password"
+        placeholder={L.password}
         value={password}
         onChange={(event) => setPassword(event.target.value)}
         disabled={busy}
@@ -135,7 +146,7 @@ export function AuthBar({ onAuthStateChange, hideRegister }: Props) {
         disabled={busy || !email.trim() || password.length < (mode === "register" ? 8 : 1)}
         className="rounded-md bg-saffron-600 px-3 py-1 font-medium text-white shadow-sm transition hover:bg-saffron-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {busy ? "…" : mode === "register" ? "Create" : "Sign in"}
+        {busy ? "…" : mode === "register" ? "Create" : L.signIn}
       </button>
       {error ? (
         <span className="text-red-600 dark:text-red-400" title={error}>

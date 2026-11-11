@@ -133,6 +133,7 @@ async def list_pairs(
     transcript_id: int | None = None,
     limit: int = 200,
     offset: int = 0,
+    untranslated: bool = False,
 ) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -142,6 +143,8 @@ async def list_pairs(
     if transcript_id is not None:
         clauses.append("transcript_id = :transcript_id")
         params["transcript_id"] = transcript_id
+    if untranslated:
+        clauses.append("(question_pt IS NULL OR answer_pt IS NULL)")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     stmt = text(
         f"SELECT * FROM persona_pairs {where} ORDER BY id ASC LIMIT :limit OFFSET :offset"
@@ -152,7 +155,10 @@ async def list_pairs(
 
 
 async def count_pairs(
-    *, status: str | None = None, transcript_id: int | None = None
+    *,
+    status: str | None = None,
+    transcript_id: int | None = None,
+    untranslated: bool = False,
 ) -> int:
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -162,6 +168,8 @@ async def count_pairs(
     if transcript_id is not None:
         clauses.append("transcript_id = :transcript_id")
         params["transcript_id"] = transcript_id
+    if untranslated:
+        clauses.append("(question_pt IS NULL OR answer_pt IS NULL)")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     stmt = text(f"SELECT COUNT(*) FROM persona_pairs {where}")
     async with database.get_connection() as conn:
@@ -175,6 +183,8 @@ async def update_pair(
     status: str | None = None,
     question: str | None = None,
     answer: str | None = None,
+    question_pt: str | None = None,
+    answer_pt: str | None = None,
     reviewed_by: str | None = None,
 ) -> dict[str, Any] | None:
     updates: dict[str, Any] = {}
@@ -186,6 +196,10 @@ async def update_pair(
         updates["question"] = question
     if answer is not None:
         updates["answer"] = answer
+    if question_pt is not None:
+        updates["question_pt"] = question_pt
+    if answer_pt is not None:
+        updates["answer_pt"] = answer_pt
     if not updates:
         return await get_pair(pair_id)
     sets = ", ".join(f"{k} = :{k}" for k in updates)

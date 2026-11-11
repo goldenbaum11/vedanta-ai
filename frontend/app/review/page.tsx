@@ -1,16 +1,16 @@
 "use client";
 
 import { ReviewSection } from "@/components/admin/ReviewSection";
+import { reviewStrings, useReviewLang } from "@/lib/reviewI18n";
 
 export default function ReviewPage() {
+  const [lang] = useReviewLang();
   return (
     <div>
       <p className="mb-6 text-sm text-ink-500 dark:text-ink-300">
-        For each pair: read the question and answer, then mark Approve,
-        Reject, or Edit. Nothing is used for training until it&apos;s
-        approved here.
+        {reviewStrings[lang].intro}
       </p>
-      <ReviewSection />
+      <ReviewSection lang={lang} />
     </div>
   );
 }

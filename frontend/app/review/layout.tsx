@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { AuthBar } from "@/components/AuthBar";
 import { getAuthProfile, onAuthChange } from "@/lib/auth";
+import { reviewStrings, useReviewLang } from "@/lib/reviewI18n";
 
 export default function ReviewLayout({
   children,
@@ -21,6 +22,8 @@ export default function ReviewLayout({
 }) {
   const [role, setRole] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [lang, setLang] = useReviewLang();
+  const t = reviewStrings[lang];
 
   useEffect(() => {
     setRole(getAuthProfile()?.role ?? null);
@@ -32,24 +35,31 @@ export default function ReviewLayout({
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6 flex items-baseline justify-between">
+      <div className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="font-serif text-2xl font-semibold text-ink-900 dark:text-ink-50">
-          Persona Pairs Review
+          {t.title}
         </h1>
-        <AuthBar hideRegister />
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setLang(lang === "en" ? "pt" : "en")}
+            aria-label={t.switchLabel}
+            title={t.switchLabel}
+            className="rounded-md border border-ink-200 px-2 py-1 text-xs font-medium text-ink-700 transition hover:bg-ink-50 dark:border-ink-700 dark:text-ink-200 dark:hover:bg-ink-800"
+          >
+            {lang === "en" ? "🇧🇷 " : "🇬🇧 "}
+            {t.switchTo}
+          </button>
+          <AuthBar hideRegister labels={t.auth} />
+        </div>
       </div>
 
       {!hydrated ? null : !allowed ? (
         <div className="rounded-lg border border-ink-200 bg-white p-4 text-sm dark:border-ink-700 dark:bg-ink-900">
           {role === null ? (
-            <p className="text-ink-700 dark:text-ink-200">
-              Sign in above with the account you were given to start
-              reviewing.
-            </p>
+            <p className="text-ink-700 dark:text-ink-200">{t.signInPrompt}</p>
           ) : (
-            <p className="text-red-700 dark:text-red-400">
-              This account doesn&apos;t have reviewer access.
-            </p>
+            <p className="text-red-700 dark:text-red-400">{t.noAccess}</p>
           )}
         </div>
       ) : (
