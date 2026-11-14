@@ -52,12 +52,14 @@ Return ONLY a JSON object, no markdown fences, no commentary:
 
 # Walks backslash pairs left to right so a valid escaped backslash is never
 # split. A stray backslash (e.g. before "ā") is dropped, keeping the letter.
-_ESCAPE_PAIR = re.compile(r"\\(.?)", re.S)
+_ESCAPE_PAIR = re.compile(r"\\(u[0-9a-fA-F]{4}|.?)", re.S)
 
 
 def _fix_escapes(body: str) -> str:
     return _ESCAPE_PAIR.sub(
-        lambda m: m.group(0) if m.group(1) and m.group(1) in '"\\/bfnrtu' else m.group(1),
+        lambda m: m.group(0)
+        if len(m.group(1)) == 5 or (m.group(1) and m.group(1) in '"\\/bfnrt')
+        else m.group(1),
         body,
     )
 
