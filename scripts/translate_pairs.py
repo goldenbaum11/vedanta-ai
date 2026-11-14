@@ -50,11 +50,62 @@ Return ONLY a JSON object, no markdown fences, no commentary:
 """
 
 
+# Walks backslash pairs left to right so a valid escaped backslash is never
+# split. A stray backslash (e.g. before "ā") is dropped, keeping the letter.
+_ESCAPE_PAIR = re.compile(r"\\(.?)", re.S)
+
+
+def _fix_escapes(body: str) -> str:
+    return _ESCAPE_PAIR.sub(
+        lambda m: m.group(0) if m.group(1) and m.group(1) in '"\\/bfnrtu' else m.group(1),
+        body,
+    )
+
+# One attempt per temperature: a JSON failure at 0.1 tends to repeat
+# verbatim, so later attempts add a little randomness.
+_TEMPERATURES = (0.1, 0.4, 0.7)
+
+
+async def _translate(llm, user: str) -> dict[str, str]:
+    last: Exception | None = None
+    for temp in _TEMPERATURES:
+        try:
+            return _parse(await llm.complete(SYSTEM_PROMPT, user, temperature=temp))
+        except Exception as exc:  # noqa: BLE001 - try the next temperature
+            last = exc
+    assert last is not None
+    raise last
+
+
+async def _api(http: httpx.AsyncClient, method: str, url: str, **kw) -> httpx.Response:
+    """HTTP call that rides out short network drops instead of quitting."""
+    for attempt in range(8):
+        try:
+            r = await http.request(method, url, **kw)
+            if r.status_code < 500:
+                r.raise_for_status()
+                return r
+        except httpx.TransportError as exc:
+            print(f"  network error ({exc!r}); retrying")
+        await asyncio.sleep(min(2 ** attempt, 120))
+    r = await http.request(method, url, **kw)
+    r.raise_for_status()
+    return r
+
+
 def _parse(raw: str) -> dict[str, str]:
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
     start, end = raw.find("{"), raw.rfind("}")
-    data = json.loads(raw[start : end + 1])
+    body = raw[start : end + 1]
+    try:
+        # strict=False tolerates raw newlines/tabs inside strings.
+        data = json.loads(body, strict=False)
+    except json.JSONDecodeError:
+        # The model sometimes emits invalid escapes next to Sanskrit
+        # diacritics (e.g. "\ā"); drop any backslash that doesn't start
+        # a valid JSON escape and try once more.
+        data = json.loads(_fix_escapes(body), strict=False)
     q, a = str(data.get("question", "")).strip(), str(data.get("answer", "")).strip()
     if not q or not a:
         raise ValueError("empty translation")
@@ -104,8 +155,7 @@ async def main() -> int:
             }
             if args.status:
                 params["status"] = args.status
-            r = await http.get("/api/v1/admin/pairs", params=params)
-            r.raise_for_status()
+            r = await _api(http, "GET", "/api/v1/admin/pairs", params=params)
             body = r.json()
             batch = [p for p in body["pairs"] if p["id"] not in skip]
             if not batch:
@@ -118,8 +168,7 @@ async def main() -> int:
                     ensure_ascii=False,
                 )
                 try:
-                    raw = await llm.complete(SYSTEM_PROMPT, user, temperature=0.1)
-                    patch = _parse(raw)
+                    patch = await _translate(llm, user)
                 except Exception as exc:  # noqa: BLE001 - keep going
                     failed += 1
                     skip.add(pair["id"])
@@ -129,7 +178,7 @@ async def main() -> int:
                     skip.add(pair["id"])
                     print(f"#{pair['id']} Q: {patch['question_pt']}\n   A: {patch['answer_pt'][:200]}…\n")
                 else:
-                    (await http.patch(f"/api/v1/admin/pairs/{pair['id']}", json=patch)).raise_for_status()
+                    await _api(http, "PATCH", f"/api/v1/admin/pairs/{pair['id']}", json=patch)
                     print(f"#{pair['id']}: ok")
                 done += 1
             if args.limit and done + failed >= args.limit:
